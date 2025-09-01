@@ -24,6 +24,14 @@
 *)
 exception TypeError of string * string * string * string option;;
 
+(* RuntimeError of
+  -  nome do erro
+  -  código do erro
+  - mensagem do erro
+  - informação adicional opcional
+*)
+exception RuntimeError of string * int * string * (string list) option;;
+
 
 
 let string_of_exn (e: exn) : string = match e with
