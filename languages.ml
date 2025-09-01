@@ -36,6 +36,12 @@ exception RuntimeError of string * int * string * (string list) option;;
 
 let string_of_exn (e: exn) : string = match e with
   | TypeError (name, code, message, info) -> "TypeError: " ^ name ^ " (" ^ code ^ "): " ^ message ^ "\n" ^ (match info with None -> "" | Some s -> s ^ "\n")
+  | RuntimeError (name, code, message, info) ->
+      "RuntimeError: " ^ name ^ " (" ^ string_of_int code ^ "): " ^ message ^ "\n" ^
+      (match info with
+        | None -> ""
+        | Some s -> (String.concat "\n" s) ^ "\n"
+      );
   | _ -> raise e
 ;;
 
