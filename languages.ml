@@ -6,10 +6,14 @@
     S_1 = {true, false, 0} | {succ t, pred t, iszero t} | S_{if t_1 then t_2 else t_3}
     S_2 = S_1 | {pair t_1 t_2, fst t, snd t}
     S_3 = S_2 | {let x = t_1 in t_2}
+    S_4 = S_3 | {fun x -> t}
+    S_5 = S_4 | {apply t_1 t_2}
+    S_6 = S_5 | {fix f -> t}
+    S_7 = S_6 | {letrec f = t in t}
 
   The `arith` language is defined over S_1 and doesn't have a type system.
 
-  This module DEFINES the LANAGUAGES
+  This module DEFINES the LANGUAGES
   - `s1`   :          simple language, implicitly typed over {Boolean, Natural}
     - `arith`:        a language of terms for simple arithmetic operations, untyped, over S_1.
     - `arith_ ic` :   a intermediate representation of instruction codes that allows compilation from `arith`
@@ -128,6 +132,31 @@ let nat_of_term (e: s1_term) : (int, exn) result = (match int_of_term e with
   | _                 -> Error (TypeError ("[NatOfTerm NotNatural]", "401", "not natural", Some (string_of_term e)))
 );;
 
+(*  string representation of the term as a value, replacing numeric values with their integer representation  *)
+let rec string_of_value (e: s1_term) : string = (match e with
+  | True  -> "true"
+  | False -> "false"
+  | Zero  -> "0"
+  | Succ e' -> (match int_of_term e' with
+    | Ok n -> string_of_int (n + 1)
+    | Error e -> raise e
+  );
+  | Pred e' -> (match int_of_term e' with
+    | Ok n -> string_of_int (n - 1)
+    | Error e -> raise e
+  );
+  | IsZero e' -> (match int_of_term e' with
+    | Ok n -> string_of_int n
+    | Error e -> raise e
+  );
+  | If (e1, e2, e3) -> "if " ^ string_of_value e1 ^ " then " ^ string_of_value e2 ^ " else " ^ string_of_value e3
+);;
+
+(*
+  ---
+  type inference for `s1` 
+  ---
+*)
 
 let rec typeinfer (e: s1_term) : (s1_type, exn) result =
   (match e with
@@ -152,19 +181,60 @@ let rec typeinfer (e: s1_term) : (s1_type, exn) result =
   );;
 
 
+(*
+  ---
+  evaluation for `s1`
+  ---
+*)
+
+(*  does one step in the evaluation of term `e` if possible *)
+let step (e: s1_term) : s1_term option = (match e with
+  | If (True, e2, e3) -> Some e2
+  | If (False, e2, e3) -> Some e3
+  | _ -> None
+);;
+
+(*  evaluates a term `e` until it can't be reduced anymore  *)
+let rec eval (e: s1_term) : s1_term = (match step e with
+  | Some e' -> eval e'
+  | None    -> e
+);;
+
+
+
+(*
+  ---
+  interpreter for `s1` language
+  ---
+*)
+let interpreter (e: s1_term) : (s1_term, exn) result =(
+  match typeinfer e with
+  | Error e ->  (
+    print_endline "type inference failed";
+    Error e
+  );
+
+  | Ok t -> (
+    let e' = eval e in
+    match typeinfer e' with
+    | Error e ->  (
+      print_endline "type inference failed";
+      Error e
+    );
+    | Ok t -> (
+      print_endline ("input: `" ^ string_of_term e ^ "`");
+      print_endline ("output: `" ^ string_of_term e' ^ "` (as_value=) `" ^ string_of_value e' ^ "`");
+      Ok e'
+    )
+  );
+);;
+
+
 (*  main  *)
 let () =
-  print_endline (string_of_term Zero);
-  print_endline (string_of_term (Succ Zero));
-  print_endline (string_of_term (Pred Zero));
-  print_endline (string_of_term (IsZero Zero));
-  print_endline (string_of_term (If (True, Zero, Zero)));
-
-  print_endline (string_of_type Boolean);
-  print_endline (string_of_type Natural);
-
-  let rec get_nat (n: int) : s1_term = if n = 0 then Zero else Succ (get_nat (n - 1)) in
-  match (nat_of_term (get_nat 10000)) with
-    | Ok n -> print_endline (string_of_int n)
-    | Error e -> print_endline (string_of_exn e);
+  match (interpreter (If (IsZero (Succ (Pred (Zero))),
+                          True,
+                          False))) with
+  | Ok e -> print_endline ("interpreter was successful");
+  | Error e -> print_endline ("interpreter failed: " ^ (string_of_exn e));
 ;;
