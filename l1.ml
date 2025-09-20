@@ -185,6 +185,8 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
   match e with
   | Integer _ -> (Int, [("T-Int", [string_of_term e])])
   | Boolean _ -> (Bool, [("T-Bool", [string_of_term e])])
+
+
   | Pair (e1, e2) -> (
     let (t1, rules1) = typeinfer e1 envtypes in
     let (t2, rules2) = typeinfer e2 envtypes in
@@ -234,7 +236,10 @@ let typeof (v: value) = typeof (term_of_value v);;
 let eval_rule_schema : (string * (string * string list)) list = [
     ("[E-Int]", ("n → n", ["n"]));
     ("[E-Bool]", ("b → b", ["b"]));
+    
     ("[E-OrderedPair]", ("(v1, v2) → (v1, v2)", ["v1"; "v2"]));
+    ("[E-Fst]", ("(v1, v2) → v1", ["v1"; "v2"]));
+    ("[E-Snd]", ("(v1, v2) → v2", ["v1"; "v2"]));
   
     ("[E-Pair 1]", ("e1 → e1'   \t (e1, e2) → (e1', e2)", ["e1"; "e1'"; "e2"]));
     ("[E-Pair 2]", ("e2 → e2'   \t (v1, e2) → (v1, e2')", ["v1"; "e2"; "e2'"]));
@@ -245,6 +250,7 @@ let eval_rule_schema : (string * (string * string list)) list = [
                   ["e2"; "e2'"; "e3"]));
     ("[E-If 3]", ("e3 → e3'   \t if false then e2 else e3 → e3'",
                   ["e2"; "e3"; "e3'"]));
+    
     ("[E-If True]", ("if true then e2 else e3 → e2", ["e2"; "e3"]));
     ("[E-If False]", ("if false then e2 else e3 → e3", ["e2"; "e3"]));
   ]
@@ -269,6 +275,26 @@ let rec eval (e: term) : (value * (string * string list) list) =
       else
         (VPair (value_of_term e1, value_of_term e2),
         [("[E-Pair]", [string_of_term e1; string_of_term e2])])
+  
+  (* fst e *)
+  | Fst e ->
+    if not (is_value_term e) then
+      let (v, rules) = eval e in
+      (VInt 0, (* dummy *)
+      ("[E-Fst]", [string_of_term e; string_of_term (Fst e)]) :: rules)
+    else
+      (value_of_term (Fst e),
+      [("[E-Fst]", [string_of_term e])])
+  
+  (* snd e *)
+  | Snd e ->
+    if not (is_value_term e) then
+      let (v, rules) = eval e in
+      (VInt 0, (* dummy *)
+      ("[E-Snd]", [string_of_term e; string_of_term (Snd e)]) :: rules)
+    else
+      (value_of_term (Snd e),
+      [("[E-Snd]", [string_of_term e])])
 
   | Conditional (e1, e2, e3) ->
     if not (is_value_term e1) then
@@ -344,6 +370,9 @@ let () = run_terms [
 
   Pair (Integer 1, Boolean true);
   Pair (Integer (-1), Boolean false);
+
+  Fst (Pair (Integer 1, Boolean true));
+  Snd (Pair (Integer 1, Boolean true));
 
   Conditional (Boolean true, Integer 1, Integer 2);
   Conditional (
