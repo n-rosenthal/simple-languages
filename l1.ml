@@ -60,6 +60,15 @@ let type_scheme_rules : (string * (string * string list)) list = [
   (* fst e, snd e *)
   ("[T-Fst]",   ("Γ ⊢ e : t1 * t2   \t Γ ⊢ fst e : t1", ["e"; "t1"; "t2";]));
   ("[T-Snd]",   ("Γ ⊢ e : t1 * t2   \t Γ ⊢ snd e : t2", ["e"; "t1"; "t2";]));
+
+  (*  var *)
+  ("[T-Var]",   ("Γ(x) = t → ⊢ x : t", ["x"; "t"]));
+
+  (*  let*)
+  ("[T-Let]",   ("Γ ⊢ e1 : T, Γ[x |→ T'] ⊢ e2 : T' --> Γ ⊢ let x : T = e1 in e2 : T' ",
+                ["e1"; "t1"; "x"; "e2"; "t2"; "let x = e1 in e2"]));
+  
+  
 ];;
 
 (* replace all occurrences of x by x' in s *)
@@ -87,13 +96,13 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
   | Snd             of term                         (* snd e                    *)
   | Fst             of term                         (* fst e                    *)
   | Conditional     of term * term * term           (* if e1 then e2 else e3    *)
+  | Identifier      of string                       (* x, identificador         *)
+  | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
 
 (*
   | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
-  | Identifier      of string                       (* x, identificador         *)
   | Application     of term * term                  (* e1 e2                    *)
   | Function        of string * tipo * term         (* fun x : t -> e           *)
-  | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
   | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
 *)
 ;;
@@ -114,6 +123,8 @@ let rec string_of_term (e: term) : string = (match e with
     | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
     | Fst e -> "fst " ^ string_of_term e
     | Snd e -> "snd " ^ string_of_term e
+    | Identifier x -> x
+    | VarDefinition (x, t, e1, e2) -> "let " ^ x ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
   );;
 
 let rec string_of_value (v: value) : string = (match v with
@@ -131,16 +142,7 @@ let rec string_of_value (v: value) : string = (match v with
     | Integer n -> VInt n
     | Boolean b -> VBool b
     | Pair (a, b) -> VPair (value_of_term a, value_of_term b)
-    | Conditional (e1, e2, e3) -> (match value_of_term e1 with
-        | VBool b -> if b then value_of_term e2 else value_of_term e3
-        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
-    | Fst e -> (match value_of_term e with
-        | VPair (v1, v2) -> v1
-        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
-    | Snd e -> (match value_of_term e with
-        | VPair (v1, v2) -> v2
-        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
-    | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t)
+    | _ -> failwith ("value_of_term: not a value")
   
   (* convert value -> term *)
   let rec term_of_value v =
@@ -163,13 +165,13 @@ let rec string_of_value (v: value) : string = (match v with
   
 
 (* --- ambiente de tipos ---------------------------------------- *)
-type env = (string * tipo) list;;
+type env = (string * term * tipo) list;;
 
 (* busca por um identificador `x` no ambiente de tipos Γ e retorna o seu tipo `t`, se existir *)
-let rec lookup (x: string) (envtypes: env) : tipo option = (
+let rec lookup (x: string) (envtypes: env) : (term * tipo)  option = (
   match envtypes with
   | [] -> None
-  | (y, t)::tl -> if x = y then Some t else lookup x tl 
+  | (y, e, t)::tl -> if x = y then Some (e, t) else lookup x tl 
 );;
 
 
@@ -211,16 +213,34 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
     )
   )
 
+  (* if e1 then e2 else e3 *)
   | Conditional (e1, e2, e3) -> (
     let (t1, rules1) = typeinfer e1 envtypes in
     let (t2, rules2) = typeinfer e2 envtypes in
     let (t3, rules3) = typeinfer e3 envtypes in (
-      if t1 <> Bool then raise (TypeError "First argument of if must be boolean") else ();
+      if t1 <> Bool then raise (TypeError ("First argument of if must be boolean: " ^ string_of_tipo t1)) else ();
       if t2 <> t3 then raise (TypeError "Branches of if must have the same type") else ();
       let if_rule = ("[T-If]", [string_of_term e1; string_of_tipo t1; string_of_term e2; string_of_tipo t2; string_of_term e3; string_of_tipo t3; string_of_term e]) in
       let rules = rules1 @ rules2 @ rules3 @ [if_rule] in
       (t2, rules)
     )
+  )
+
+  (* x *)
+  | Identifier x -> (
+    match lookup x envtypes with
+    | Some (e, t)   -> (t, [("T-Var", [x; string_of_tipo t])])
+    | None          -> raise (TypeError ("Unbound identifier: " ^ x))
+  )
+
+  (* let x = e1 in e2 *)
+  (* Γ ⊢ e1 : T, Γ[x |→ T'] ⊢ e2 : T' --> Γ ⊢ let x : T = e1 in e2 : T' *)
+  | VarDefinition (x, t, e1, e2) -> (
+    let (t1, rules1) = typeinfer e1 envtypes in
+    let (t2, rules2) = typeinfer e2 ((x, e, t1)::envtypes) in
+    let let_rule = ("[T-Let]", [string_of_term e1; string_of_tipo t1; x; string_of_term e2; string_of_tipo t2; string_of_term e]) in
+    let rules = rules1 @ rules2 @ [let_rule] in
+    (t2, rules)
   )
 
   | _ -> raise (TypeError "Malformed term")
@@ -253,80 +273,107 @@ let eval_rule_schema : (string * (string * string list)) list = [
     
     ("[E-If True]", ("if true then e2 else e3 → e2", ["e2"; "e3"]));
     ("[E-If False]", ("if false then e2 else e3 → e3", ["e2"; "e3"]));
+
+    ("[E-Var]", ("x = v → v", ["x"; "v"]));
+
+    ("[E-Let 1]", ("e1 → e1'   \t let x = e1 in e2 → let x = e1' in e2", ["e1"; "e1'"; "e2"; "x"]));
+    ("[E-Let 2]", ("let x:T = v in e2 --> {v/x}e2", ["v"; "e2"; "x"; "T"]));
   ]
 ;;
 
-let rec eval (e: term) : (value * (string * string list) list) =
-  match e with
-  | Integer i -> (VInt i, [("[E-Int]", [string_of_term e])])
-  | Boolean b -> (VBool b, [("[E-Bool]", [string_of_term e])])
-
-  | Pair (e1, e2) ->
-      if not (is_value_term e1) then
-        let (v1, rules1) = eval e1 in
-        (VPair (VInt 0, VInt 0), (* dummy, replaced below *)
-        ("[E-Pair 1]", [string_of_term e1; string_of_term e2; string_of_term (Pair (e1, e2));
-                        string_of_term (Pair (term_of_value v1, e2))]) :: rules1)
-      else if not (is_value_term e2) then
-        let (v2, rules2) = eval e2 in
-        (VPair (VInt 0, VInt 0), (* dummy *)
-        ("[E-Pair 2]", [string_of_term e1; string_of_term e2; string_of_term (Pair (e1, e2));
-                        string_of_term (Pair (e1, term_of_value v2))]) :: rules2)
-      else
-        (VPair (value_of_term e1, value_of_term e2),
-        [("[E-Pair]", [string_of_term e1; string_of_term e2])])
-  
+let rec eval (e: term) (envtypes: env): (value * env * ((string * string list) list)) = (
+    match e with
+    | Integer i   -> (VInt i,   envtypes,   [("E-Int", [string_of_int i])])
+    | Boolean b   -> (VBool b,  envtypes,   [("E-Bool", [string_of_bool b])])
+    | Pair (e1, e2) -> (
+      let (v1, envtypes1, rules1) = eval e1 envtypes in
+      let (v2, envtypes2, rules2) = eval e2 envtypes1 in
+      (VPair (v1, v2), envtypes2, rules1 @ rules2 @ [("E-OrderedPair", [string_of_value v1; string_of_value v2])])
+    )
   (* fst e *)
   | Fst e ->
     if not (is_value_term e) then
-      let (v, rules) = eval e in
-      (VInt 0, (* dummy *)
-      ("[E-Fst]", [string_of_term e; string_of_term (Fst e)]) :: rules)
+      (* Step inside e *)
+      let (v, envtypes, rules) = eval e envtypes in
+      let step = ("[E-Fst]", [string_of_term (Fst e);
+                              string_of_term (Fst (term_of_value v))]) in
+      (v, envtypes, step :: rules)
     else
-      (value_of_term (Fst e),
-      [("[E-Fst]", [string_of_term e])])
-  
+      (match value_of_term e with
+      | VPair (v1, v2) ->
+          let step = ("[E-FstPair]", [string_of_term (Fst e);
+                                      string_of_value v1]) in
+          (v1, envtypes, [step])
+      | _ -> failwith "fst applied to non-pair value"
+      )
+
   (* snd e *)
   | Snd e ->
     if not (is_value_term e) then
-      let (v, rules) = eval e in
-      (VInt 0, (* dummy *)
-      ("[E-Snd]", [string_of_term e; string_of_term (Snd e)]) :: rules)
+      (* Step inside e *)
+      let (v, envtypes, rules) = eval e envtypes in
+      let step = ("[E-Snd]", [string_of_term (Snd e);
+                              string_of_term (Snd (term_of_value v))]) in
+      (v, envtypes, step :: rules)
     else
-      (value_of_term (Snd e),
-      [("[E-Snd]", [string_of_term e])])
+      (match value_of_term e with
+      | VPair (v1, v2) ->
+          let step = ("[E-SndPair]", [string_of_term (Snd e);
+                                      string_of_value v2]) in
+          (v2, envtypes, [step])
+      | _ -> failwith "snd applied to non-pair value"
+      )
 
-  | Conditional (e1, e2, e3) ->
-    if not (is_value_term e1) then
-      let (v1, rules1) = eval e1 in
-      let step = ("[E-If 1]",
-        [ string_of_term (Conditional (e1, e2, e3));
-        string_of_term (Conditional (term_of_value v1, e2, e3)) ]) in
-      (value_of_term (Conditional (term_of_value v1, e2, e3)), step :: rules1)
-      
-    else match value_of_term e1 with
-      | VBool true ->
-        (* if true then e2 else e3 --> e2 *)
-        let step = ("[E-If True]",
-          [ string_of_term (Conditional (e1, e2, e3));
-            string_of_term e2 ]) in
-        let (v2, rules2) = eval e2 in
-        (v2, step :: rules2)
-      
-      | VBool false ->
-        (* if false then e2 else e3 --> e3 *)
-        let step = ("[E-If False]",
-          [ string_of_term (Conditional (e1, e2, e3));
-            string_of_term e3 ]) in
-        let (v3, rules3) = eval e3 in
-        (v3, step :: rules3)
-      
-      | _ -> raise (TypeError "Condição de um If(e1, e2, e3) não pôde ser avaliada para Boolean.")
+    | Conditional (e1, e2, e3) -> (
+        if not (is_value_term e1) then
+          (* Step the guard e1 *)
+          let (v1, envtypes, rules1) = eval e1 envtypes in
+          let step = ("[E-If]", [string_of_term (Conditional (e1, e2, e3));
+                                string_of_term (Conditional (term_of_value v1, e2, e3))]) in
+          (v1, envtypes, step :: rules1)
+    
+        else match value_of_term e1 with
+          | VBool true ->
+              let (v2, envtypes, rules2) = eval e2 envtypes in
+              (v2, envtypes, rules2 @
+                [("[E-If True]", [string_of_term (Conditional (e1, e2, e3));
+                                  string_of_value v2])])
+    
+          | VBool false ->
+              let (v3, envtypes, rules3) = eval e3 envtypes in
+              (v3, envtypes, rules3 @
+                [("[E-If False]", [string_of_term (Conditional (e1, e2, e3));
+                                    string_of_value v3])])
+    
+          | _ -> raise (TypeError
+                          ("First argument of if must be boolean: "
+                            ^ string_of_term e1
+                            ^ " has type "
+                            ^ string_of_tipo (typeof (value_of_term e1))))
+    )
 
-  | _ -> raise (TypeError "Malformed term")
-      ;;
+    (* x *)
+    | Identifier x -> (
+      match lookup x envtypes with
+      | Some (e, t)   -> 
+        let (v, envtypes, rules) = eval e envtypes in
+        (v, envtypes, rules @ [("E-Var", [x; string_of_value v])])
+      | None          -> raise (TypeError ("Unbound identifier: " ^ x)) 
+    )
 
+    (* let x = e1 in e2
+       first, eval e1 up to a value v1, then substitute v1 for every occurence of x in e2 *)
+    | VarDefinition (x, t, e1, e2) -> (
+      let (v1, envtypes, rules1) = eval e1 envtypes in
+      let (v2, envtypes, rules2) = eval e2 ((x, term_of_value v1, t)::envtypes) in
+      (v2, envtypes,  rules1 @ 
+                      rules2 @ 
+                      [("E-Let 1", [string_of_term e1; string_of_value v1; string_of_term e2; x])] @
+                      [("E-Let 2", [string_of_value v2; string_of_term e2; x; string_of_tipo t])])
+    )
 
+    | _ -> raise (TypeError "Malformed term")
+  )
 
 let print_rules title rules =
   print_endline ("-- " ^ title ^ " rules --");
@@ -337,60 +384,31 @@ let print_rules title rules =
         print_endline ""
 ;;
       
-let run_term (t : term) (ctx : (string * tipo) list) =
-  print_endline "========================================";
-  print_endline ("Term: " ^ string_of_term t);
-  print_endline "";
-      
-  (* Type inference *)
-  let (ty, ty_rules) = typeinfer t ctx in
-    print_rules "Type inference" ty_rules;
-    print_endline ("Type result: " ^ string_of_term t ^ " : " ^ string_of_tipo ty);
-    print_endline "";
-      
-  (* Evaluation *)
-    let (v, ev_rules) = eval t in
-    print_rules "Evaluation" ev_rules;
-    print_endline ("Eval result: " ^ string_of_value v
-                  ^ " : " ^ string_of_tipo (typeof v));
-    print_endline "========================================\n"
-;;
-      
-let run_terms (ts : term list) (ctx : (string * tipo) list) =
-  List.iter (fun t -> run_term t ctx) ts
+let interpret (e: term) (env: env) : (value * env) = (
+  let (t, rules)        = typeinfer e env in
+  let (v, env', rules') = eval e env in
+  print_endline ("expr: `" ^ string_of_term e ^ "`");
+  print_endline ("type: `" ^ string_of_tipo t ^ "`");
+  print_rules "Type inference" rules;
+  print_rules "Evaluation" rules';
+  (v, env')
+)
+
+let interpret (ex: term list) (env: env) : (value * env) list = List.map (fun e -> interpret e env) ex
 ;;
 
 
-
-let () = run_terms [
-  Integer     1;
-  Integer     (-1);
-  Boolean     true;
-  Boolean     false;
-
-  Pair (Integer 1, Boolean true);
-  Pair (Integer (-1), Boolean false);
-
-  Fst (Pair (Integer 1, Boolean true));
-  Snd (Pair (Integer 1, Boolean true));
-
-  Conditional (Boolean true, Integer 1, Integer 2);
-  Conditional (
-    Conditional(Boolean true, Boolean false, Boolean true),
-    Integer 1,
-    Integer 2
-  );
-  Conditional(
-    Conditional(
-      Boolean true,
+let _ = interpret ([
+  VarDefinition ("x", Int, Integer 1,
+    VarDefinition ("y", Int, Integer 2,
       Conditional(
-        Boolean false,
-        Boolean true,
-        Boolean false
-      ),
-      Boolean true
-    ),
-    Integer 1,
-    Integer 2
-  );
-] [];
+        Fst(
+          Pair(
+            Boolean true,
+            Identifier "x"
+          )
+        ),
+        Identifier "x",
+        Identifier "y"
+      )))
+]) ([]);;
