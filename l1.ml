@@ -94,6 +94,14 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
 *)
 ;;
 
+type value =
+  | VInt      of int
+  | VBool     of bool
+  | VPair     of value * value
+  | VFn       of string * term
+  | VRecFn    of string * term
+;;
+
 (*  repr. string de um termo em L1 *)
 let rec string_of_term (e: term) : string = (match e with
     | Integer i -> string_of_int i
@@ -103,14 +111,42 @@ let rec string_of_term (e: term) : string = (match e with
     | _ -> ""
   );;
 
-(*  retorna verdadeiro se `e` é um valor em L1 *)
-let rec is_value (e: term) : bool = (match e with
-    | Integer _ -> true
-    | Boolean _ -> true
-    | OrderedPair (e1, e2) -> is_value e1 && is_value e2
-    | _ -> false
+let rec string_of_value (v: value) : string = (match v with
+    | VInt i -> string_of_int i
+    | VBool b -> string_of_bool b
+    | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
+    | _ -> ""
   );;
 
+
+(* convert term -> value (only valid if term is a value) *)
+  let rec value_of_term t =
+    match t with
+    | Integer n -> VInt n
+    | Boolean b -> VBool b
+    | OrderedPair (a, b) -> VPair (value_of_term a, value_of_term b)
+    | Conditional (e1, e2, e3) -> (match value_of_term e1 with
+        | VBool b -> if b then value_of_term e2 else value_of_term e3
+        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
+    | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t)
+  
+  (* convert value -> term *)
+  let rec term_of_value v =
+    match v with
+    | VInt n -> Integer n
+    | VBool b -> Boolean b
+    | VPair (v1, v2) -> OrderedPair (term_of_value v1, term_of_value v2)
+    | _ -> failwith ("term_of_value: not a term")
+  ;;
+  
+  (* is this term already a value? *)
+  let rec is_value_term t =
+    match t with
+    | Integer _ | Boolean _ -> true
+    | OrderedPair (a, b) -> is_value_term a && is_value_term b
+    | _ -> false
+  ;;
+  
 
 (* --- ambiente de tipos ---------------------------------------- *)
 type env = (string * tipo) list;;
@@ -158,10 +194,144 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
   | _ -> raise (TypeError "Malformed term")
 );;
 
-let (tipo, rules) = typeinfer (OrderedPair (Integer 1, Boolean true)) [] in
-List.iter (fun (rule, terms) -> Printf.printf "%s\n\t%s\n" rule (String.concat "\n\t" terms)) rules;
-print_endline (string_of_term (OrderedPair (Integer 1, Boolean true)) ^ " : " ^ string_of_tipo tipo);;
+let typeof (e: term) = fst (typeinfer e []);;
+let typeof (v: value) = typeof (term_of_value v);;
 
-let (tipo, rules) = typeinfer (Conditional (Boolean true, Integer 1, Integer 2)) [] in
-List.iter (fun (rule, terms) -> Printf.printf "%s\n\t%s\n" rule (String.concat "\n\t" terms)) rules;
-print_endline (string_of_term (Conditional (Boolean true, Integer 1, Integer 2)) ^ " : " ^ string_of_tipo tipo);;
+
+(* =============================================================
+  Avaliação de Termos para L1
+  ==============================================================  *)
+let eval_rule_schema : (string * (string * string list)) list = [
+    ("[E-Int]", ("n → n", ["n"]));
+    ("[E-Bool]", ("b → b", ["b"]));
+    ("[E-OrderedPair]", ("(v1, v2) → (v1, v2)", ["v1"; "v2"]));
+  
+    ("[E-Pair 1]", ("e1 → e1'   \t (e1, e2) → (e1', e2)", ["e1"; "e1'"; "e2"]));
+    ("[E-Pair 2]", ("e2 → e2'   \t (v1, e2) → (v1, e2')", ["v1"; "e2"; "e2'"]));
+  
+    ("[E-If 1]", ("e1 → e1'   \t if e1 then e2 else e3 → if e1' then e2 else e3",
+                  ["e1"; "e1'"; "e2"; "e3"]));
+    ("[E-If 2]", ("e2 → e2'   \t if true then e2 else e3 → e2'",
+                  ["e2"; "e2'"; "e3"]));
+    ("[E-If 3]", ("e3 → e3'   \t if false then e2 else e3 → e3'",
+                  ["e2"; "e3"; "e3'"]));
+    ("[E-If True]", ("if true then e2 else e3 → e2", ["e2"; "e3"]));
+    ("[E-If False]", ("if false then e2 else e3 → e3", ["e2"; "e3"]));
+  ]
+;;
+
+let rec eval (e: term) : (value * (string * string list) list) =
+  match e with
+  | Integer i -> (VInt i, [("[E-Int]", [string_of_term e])])
+  | Boolean b -> (VBool b, [("[E-Bool]", [string_of_term e])])
+
+  | OrderedPair (e1, e2) ->
+      if not (is_value_term e1) then
+        let (v1, rules1) = eval e1 in
+        (VPair (VInt 0, VInt 0), (* dummy, replaced below *)
+        ("[E-Pair 1]", [string_of_term e1; string_of_term e2; string_of_term (OrderedPair (e1, e2));
+                        string_of_term (OrderedPair (term_of_value v1, e2))]) :: rules1)
+      else if not (is_value_term e2) then
+        let (v2, rules2) = eval e2 in
+        (VPair (VInt 0, VInt 0), (* dummy *)
+        ("[E-Pair 2]", [string_of_term e1; string_of_term e2; string_of_term (OrderedPair (e1, e2));
+                        string_of_term (OrderedPair (e1, term_of_value v2))]) :: rules2)
+      else
+        (VPair (value_of_term e1, value_of_term e2),
+        [("[E-OrderedPair]", [string_of_term e1; string_of_term e2])])
+
+  | Conditional (e1, e2, e3) ->
+    if not (is_value_term e1) then
+      let (v1, rules1) = eval e1 in
+      let step = ("[E-If 1]",
+        [ string_of_term (Conditional (e1, e2, e3));
+        string_of_term (Conditional (term_of_value v1, e2, e3)) ]) in
+      (value_of_term (Conditional (term_of_value v1, e2, e3)), step :: rules1)
+      
+    else match value_of_term e1 with
+      | VBool true ->
+        (* if true then e2 else e3 --> e2 *)
+        let step = ("[E-If True]",
+          [ string_of_term (Conditional (e1, e2, e3));
+            string_of_term e2 ]) in
+        let (v2, rules2) = eval e2 in
+        (v2, step :: rules2)
+      
+      | VBool false ->
+        (* if false then e2 else e3 --> e3 *)
+        let step = ("[E-If False]",
+          [ string_of_term (Conditional (e1, e2, e3));
+            string_of_term e3 ]) in
+        let (v3, rules3) = eval e3 in
+        (v3, step :: rules3)
+      
+      | _ -> raise (TypeError "Condição de um If(e1, e2, e3) não pôde ser avaliada para Boolean.")
+
+  | _ -> raise (TypeError "Malformed term")
+      ;;
+
+
+
+let print_rules title rules =
+  print_endline ("-- " ^ title ^ " rules --");
+    List.iter
+      (fun (rule, terms) ->
+        Printf.printf "%s\n\t%s\n" rule (String.concat "\n\t" terms))
+          rules;
+        print_endline ""
+;;
+      
+let run_term (t : term) (ctx : (string * tipo) list) =
+  print_endline "========================================";
+  print_endline ("Term: " ^ string_of_term t);
+  print_endline "";
+      
+  (* Type inference *)
+  let (ty, ty_rules) = typeinfer t ctx in
+    print_rules "Type inference" ty_rules;
+    print_endline ("Type result: " ^ string_of_term t ^ " : " ^ string_of_tipo ty);
+    print_endline "";
+      
+  (* Evaluation *)
+    let (v, ev_rules) = eval t in
+    print_rules "Evaluation" ev_rules;
+    print_endline ("Eval result: " ^ string_of_value v
+                  ^ " : " ^ string_of_tipo (typeof v));
+    print_endline "========================================\n"
+;;
+      
+let run_terms (ts : term list) (ctx : (string * tipo) list) =
+  List.iter (fun t -> run_term t ctx) ts
+;;
+
+
+
+let () = run_terms [
+  Integer     1;
+  Integer     (-1);
+  Boolean     true;
+  Boolean     false;
+
+  OrderedPair (Integer 1, Boolean true);
+  OrderedPair (Integer (-1), Boolean false);
+
+  Conditional (Boolean true, Integer 1, Integer 2);
+  Conditional (
+    Conditional(Boolean true, Boolean false, Boolean true),
+    Integer 1,
+    Integer 2
+  );
+  Conditional(
+    Conditional(
+      Boolean true,
+      Conditional(
+        Boolean false,
+        Boolean true,
+        Boolean false
+      ),
+      Boolean true
+    ),
+    Integer 1,
+    Integer 2
+  );
+] [];
