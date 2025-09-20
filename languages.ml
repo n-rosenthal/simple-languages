@@ -62,10 +62,10 @@ type s1_term =
 | False                 (*  second constructor of `Boolean` *)
 | Zero                  (*  main constructor of `Natural` *)
 
-| Succ of s1_term      (*  successor constructor of `Natural` *)
-| Pred of s1_term      (*  predecessor constructor of `Natural` *)
+| Succ of s1_term       (*  successor constructor of `Natural` *)
+| Pred of s1_term       (*  predecessor constructor of `Natural` *)
 
-| IsZero of s1_term    (*  unary operator over `Natural`. *)
+| IsZero of s1_term     (*  unary operator over `Natural`. *)
 
 (*  control structures *)
 | If of s1_term * s1_term * s1_term  (*  if (e_1 : Boolean) then (e_2 : T) else (e_3 : T) *)
@@ -158,6 +158,7 @@ let rec string_of_value (e: s1_term) : string = (match e with
   ---
 *)
 
+(*  type inference for `s1` *)
 let rec typeinfer (e: s1_term) : (s1_type, exn) result =
   (match e with
     | True  | False                       ->  Ok Boolean;
@@ -199,7 +200,6 @@ let rec eval (e: s1_term) : s1_term = (match step e with
   | Some e' -> eval e'
   | None    -> e
 );;
-
 
 
 (*
