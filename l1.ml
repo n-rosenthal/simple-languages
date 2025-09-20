@@ -56,6 +56,10 @@ let type_scheme_rules : (string * (string * string list)) list = [
   
   ("[T-If]",    ("Γ ⊢ e1 : bool   \t Γ ⊢ e2 : t   \t Γ ⊢ e3 : t   \t Γ ⊢ if e1 then e2 else e3 : t",
                 ["e1"; "e2"; "e3"; "t"; "if e1 then e2 else e3"]));
+
+  (* fst e, snd e *)
+  ("[T-Fst]",   ("Γ ⊢ e : t1 * t2   \t Γ ⊢ fst e : t1", ["e"; "t1"; "t2";]));
+  ("[T-Snd]",   ("Γ ⊢ e : t1 * t2   \t Γ ⊢ snd e : t2", ["e"; "t1"; "t2";]));
 ];;
 
 (* replace all occurrences of x by x' in s *)
@@ -79,7 +83,9 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
   type term =
   | Integer         of int                          (* valor: inteiro           *)
   | Boolean         of bool                         (* valor: booleano          *)
-  | OrderedPair     of term * term                  (* valor: par v,u           *)
+  | Pair            of term * term                  (* valor: par v,u           *)
+  | Snd             of term                         (* snd e                    *)
+  | Fst             of term                         (* fst e                    *)
   | Conditional     of term * term * term           (* if e1 then e2 else e3    *)
 
 (*
@@ -89,8 +95,6 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
   | Function        of string * tipo * term         (* fun x : t -> e           *)
   | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
   | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
-  | Fst             of term                         (* fst e                    *)
-  | Snd             of term                         (* snd e                    *)
 *)
 ;;
 
@@ -106,16 +110,18 @@ type value =
 let rec string_of_term (e: term) : string = (match e with
     | Integer i -> string_of_int i
     | Boolean b -> string_of_bool b
-    | OrderedPair (e1, e2) -> "(" ^ string_of_term e1 ^ ", " ^ string_of_term e2 ^ ")"
+    | Pair (e1, e2) -> "(" ^ string_of_term e1 ^ ", " ^ string_of_term e2 ^ ")"
     | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
-    | _ -> ""
+    | Fst e -> "fst " ^ string_of_term e
+    | Snd e -> "snd " ^ string_of_term e
   );;
 
 let rec string_of_value (v: value) : string = (match v with
     | VInt i -> string_of_int i
     | VBool b -> string_of_bool b
     | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
-    | _ -> ""
+    | VFn (x, e) -> "fun " ^ x ^ " -> " ^ string_of_term e
+    | VRecFn (f, e) -> "rec " ^ f ^ " -> " ^ string_of_term e
   );;
 
 
@@ -124,9 +130,15 @@ let rec string_of_value (v: value) : string = (match v with
     match t with
     | Integer n -> VInt n
     | Boolean b -> VBool b
-    | OrderedPair (a, b) -> VPair (value_of_term a, value_of_term b)
+    | Pair (a, b) -> VPair (value_of_term a, value_of_term b)
     | Conditional (e1, e2, e3) -> (match value_of_term e1 with
         | VBool b -> if b then value_of_term e2 else value_of_term e3
+        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
+    | Fst e -> (match value_of_term e with
+        | VPair (v1, v2) -> v1
+        | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
+    | Snd e -> (match value_of_term e with
+        | VPair (v1, v2) -> v2
         | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t))
     | _ -> failwith ("value_of_term: not a value: " ^ string_of_term t)
   
@@ -135,7 +147,9 @@ let rec string_of_value (v: value) : string = (match v with
     match v with
     | VInt n -> Integer n
     | VBool b -> Boolean b
-    | VPair (v1, v2) -> OrderedPair (term_of_value v1, term_of_value v2)
+    | VPair (v1, v2) -> Pair (term_of_value v1, term_of_value v2)
+    | VFn (x, e) -> failwith ("term_of_value: not a term")
+    | VRecFn (f, e) -> failwith ("term_of_value: not a term")
     | _ -> failwith ("term_of_value: not a term")
   ;;
   
@@ -143,7 +157,7 @@ let rec string_of_value (v: value) : string = (match v with
   let rec is_value_term t =
     match t with
     | Integer _ | Boolean _ -> true
-    | OrderedPair (a, b) -> is_value_term a && is_value_term b
+    | Pair (a, b) -> is_value_term a && is_value_term b
     | _ -> false
   ;;
   
@@ -171,12 +185,28 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
   match e with
   | Integer _ -> (Int, [("T-Int", [string_of_term e])])
   | Boolean _ -> (Bool, [("T-Bool", [string_of_term e])])
-  | OrderedPair (e1, e2) -> (
+  | Pair (e1, e2) -> (
     let (t1, rules1) = typeinfer e1 envtypes in
     let (t2, rules2) = typeinfer e2 envtypes in
     let pair_rule = ("[T-Pair]", [string_of_term e1; string_of_tipo t1; string_of_term e2; string_of_tipo t2; string_of_term e]) in
     let rules = rules1 @ rules2 @ [pair_rule] in
     (OrderedPair (t1, t2), rules)
+  )
+
+  (*  fst e   *)
+  | Fst e -> (
+    let (t, rules) = typeinfer e envtypes in (match t with
+      | OrderedPair (t1, t2) -> (t1, rules @ [("T-Fst", [string_of_term e; string_of_term e])])
+      | _ -> raise (TypeError "argument of `fst e` must be a pair")
+    )
+  )
+
+  (*  snd e   *)
+  | Snd e -> (
+    let (t, rules) = typeinfer e envtypes in (match t with
+      | OrderedPair (t1, t2) -> (t2, rules @ [("T-Snd", [string_of_term e; string_of_term e])])
+      | _ -> raise (TypeError "argument of `snd e` must be a pair")
+    )
   )
 
   | Conditional (e1, e2, e3) -> (
@@ -225,20 +255,20 @@ let rec eval (e: term) : (value * (string * string list) list) =
   | Integer i -> (VInt i, [("[E-Int]", [string_of_term e])])
   | Boolean b -> (VBool b, [("[E-Bool]", [string_of_term e])])
 
-  | OrderedPair (e1, e2) ->
+  | Pair (e1, e2) ->
       if not (is_value_term e1) then
         let (v1, rules1) = eval e1 in
         (VPair (VInt 0, VInt 0), (* dummy, replaced below *)
-        ("[E-Pair 1]", [string_of_term e1; string_of_term e2; string_of_term (OrderedPair (e1, e2));
-                        string_of_term (OrderedPair (term_of_value v1, e2))]) :: rules1)
+        ("[E-Pair 1]", [string_of_term e1; string_of_term e2; string_of_term (Pair (e1, e2));
+                        string_of_term (Pair (term_of_value v1, e2))]) :: rules1)
       else if not (is_value_term e2) then
         let (v2, rules2) = eval e2 in
         (VPair (VInt 0, VInt 0), (* dummy *)
-        ("[E-Pair 2]", [string_of_term e1; string_of_term e2; string_of_term (OrderedPair (e1, e2));
-                        string_of_term (OrderedPair (e1, term_of_value v2))]) :: rules2)
+        ("[E-Pair 2]", [string_of_term e1; string_of_term e2; string_of_term (Pair (e1, e2));
+                        string_of_term (Pair (e1, term_of_value v2))]) :: rules2)
       else
         (VPair (value_of_term e1, value_of_term e2),
-        [("[E-OrderedPair]", [string_of_term e1; string_of_term e2])])
+        [("[E-Pair]", [string_of_term e1; string_of_term e2])])
 
   | Conditional (e1, e2, e3) ->
     if not (is_value_term e1) then
@@ -312,8 +342,8 @@ let () = run_terms [
   Boolean     true;
   Boolean     false;
 
-  OrderedPair (Integer 1, Boolean true);
-  OrderedPair (Integer (-1), Boolean false);
+  Pair (Integer 1, Boolean true);
+  Pair (Integer (-1), Boolean false);
 
   Conditional (Boolean true, Integer 1, Integer 2);
   Conditional (
