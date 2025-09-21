@@ -19,6 +19,35 @@ exception TypeError of string;;
 exception RuntimeError of string;;
 
 
+(* ============================================================
+  L1_arith
+  Extensão de L1 sobre operações aritméticas e relacionais sobre
+  inteiros e booleanos
+  
+  1.  Criação do tipo `binop` para representar operações binárias
+  2.  Extensão da sintaxe de termos
+  3.  Inferência estática de tipos; avaliação; interpretador;
+  =========================================================== *)
+
+(* operadores binários sobre inteiros ou booleanos *)
+type binop =
+  | Add | Sub | Mul | Div                 (* op. bin. aritméticas *)
+  | Eq  | Neq | Gt  | Geq | Lt  | Leq     (* op. bin. relacionais *)
+
+let string_of_binop (b: binop) : string = match b with
+  | Add -> "+"
+  | Sub -> "-"
+  | Mul -> "*"
+  | Div -> "/"
+  | Eq  -> "="
+  | Neq -> "<>"
+  | Gt  -> ">"
+  | Geq -> ">="
+  | Lt  -> "<"
+  | Leq -> "<="
+;;
+
+
 (* 
   ==============================================================
   Sistema de tipos para L1
@@ -79,6 +108,46 @@ let type_scheme_rules : (string * (string * string list)) list = [
   (* let rec *)
   ("[T-RecFn]", ("Γ, f : τ ⊢ e1 : τ   \t Γ, f : τ ⊢ e2 : τ2   \t Γ ⊢ let rec f : τ = e1 in e2 : τ2", 
                 ["f"; "τ"; "e1"; "e2"; "let rec f = e1 in e2"]));
+
+  (*  operações binárias    *)
+  (*  op. bin. aritméticas  *)
+  ("[T-Op+]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 + e2 : int",
+                ["e1"; "int"; "e2"; "int"; "e1 + e2"]));
+
+  ("[T-Op-]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 - e2 : int",
+                ["e1"; "int"; "e2"; "int"; "e1 - e2"]));
+
+  ("[T-Op*]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 * e2 : int",
+                ["e1"; "int"; "e2"; "int"; "e1 * e2"]));
+
+  ("[T-Op/]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 / e2 : int",
+                ["e1"; "int"; "e2"; "int"; "e1 / e2"]));
+  
+  (*  op. bin. relacionais aritméticas  *)
+  ("[T-Op<]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 < e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 < e2"]));
+
+  ("[T-Op>]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 > e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 > e2"]));
+  
+  ("[T-Op<=]",  ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 <= e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 <= e2"]));
+  
+  ("[T-Op>=]",  ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 >= e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 >= e2"]));
+  
+  ("[T-Op=]",   ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 = e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 = e2"]));
+  
+  ("[T-Op<>]",  ("Γ ⊢ e1 : int   \t Γ ⊢ e2 : int   \t Γ ⊢ e1 <> e2 : bool",
+                ["e1"; "int"; "e2"; "int"; "e1 <> e2"]));
+
+  (*  op. bin. relacionais booleanas  *)
+  ("[T-Op&&]",  ("Γ ⊢ e1 : bool   \t Γ ⊢ e2 : bool   \t Γ ⊢ e1 && e2 : bool",
+                ["e1"; "bool"; "e2"; "bool"; "e1 && e2"]));
+
+  ("[T-Op||]",  ("Γ ⊢ e1 : bool   \t Γ ⊢ e2 : bool   \t Γ ⊢ e1 || e2 : bool",
+                ["e1"; "bool"; "e2"; "bool"; "e1 || e2"]));
 ];;
 
 (* replace all occurrences of x by x' in s *)
@@ -111,9 +180,9 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
             | Function        of string * tipo * term * term  (* fun x : t -> e in e2     *)
             | Application     of term * term                  (* e1 e2                    *)
             | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
+            | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
 
 (*
-  | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
 *)
 ;;
 
@@ -148,6 +217,7 @@ let rec string_of_term (e: term) : string = (match e with
     | Function (x, t, e, e2) -> "fun " ^ x ^ " : " ^ string_of_tipo t ^ " -> " ^ string_of_term e ^ " in " ^ string_of_term e2
     | Application (e1, e2) -> "( " ^ string_of_term e1 ^ " ) @ ( " ^ string_of_term e2 ^ " )"
     | RecFunction (f, t, e1, e2) -> "let rec " ^ f ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
+    | BinaryOperation (op, e1, e2) -> string_of_term e1 ^ " " ^ string_of_binop op ^ " " ^ string_of_term e2
   );;
 
 let rec string_of_value (v: value) : string = (match v with
@@ -285,7 +355,7 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
   )
 
   (* let rec *)
-  | RecFunction (f, t, e1, e2) ->
+  | RecFunction (f, t, e1, e2) -> (
     let (t1, rules1) = typeinfer e1 ((f, e1, t) :: envtypes) in
     if t1 <> t then
       raise (TypeError ("Recursive definition type mismatch: " ^
@@ -295,6 +365,35 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
     (t2,
     ("[T-LetRec]", [string_of_term (RecFunction (f, t, e1, e2));
                     string_of_tipo t2]) :: rules1 @ rules2)
+  )
+  
+  
+  (*  operações binárias  *)
+  | BinaryOperation (op, e1, e2) -> (
+    let (t1, rules1) = typeinfer e1 envtypes in
+    let (t2, rules2) = typeinfer e2 envtypes in
+    (match (op, t1, t2) with
+      (* op. binárias aritméticas *)
+      | (Add, Int, Int) -> (Int, rules1 @ rules2 @ [("T-Op+", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Sub, Int, Int) -> (Int, rules1 @ rules2 @ [("T-Op-", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Mul, Int, Int) -> (Int, rules1 @ rules2 @ [("T-Op*", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Div, Int, Int) -> (Int, rules1 @ rules2 @ [("T-Op/", [string_of_term e1; string_of_term e2; string_of_term e])])
+
+      (* op. binárias relacionais aritméticas *)
+      | (Eq, Int, Int) -> (Bool, rules1 @ rules2 @ [("T-Op=", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Lt, Int, Int) -> (Bool, rules1 @ rules2 @ [("T-Op<", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Gt, Int, Int) -> (Bool, rules1 @ rules2 @ [("T-Op>", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Leq, Int, Int) -> (Bool, rules1 @ rules2 @ [("T-Op<=", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Geq, Int, Int) -> (Bool, rules1 @ rules2 @ [("T-Op>=", [string_of_term e1; string_of_term e2; string_of_term e])])
+
+      (* op. binárias relacionais booleanas *)
+      | (Eq, Bool, Bool) -> (Bool, rules1 @ rules2 @ [("T-Op&&", [string_of_term e1; string_of_term e2; string_of_term e])])
+      | (Neq, Bool, Bool) -> (Bool, rules1 @ rules2 @ [("T-Op||", [string_of_term e1; string_of_term e2; string_of_term e])])
+
+      (*  erro  *)
+      | _ -> raise (TypeError ("Invalid binary operation: " ^ string_of_term e))
+    )
+  )
 
   | _ -> raise (TypeError "Malformed term")
 );;
@@ -339,6 +438,21 @@ let eval_rule_schema : (string * (string * string list)) list = [
     ("[E-AppFun]", ("e1 = fun x : t -> e   \t e2 = v2   \t (fun x : t -> e) v2 → e[x ↦ v2]", ["e1"; "e2"; "t"; "x"]));
 
     ("[E-RecFun]", ("e1 = fun x : t -> e   \t e2 = v2   \t let rec x = e1 in e2 → let rec x = e1 in e2", ["e1"; "e2"; "t"; "x"]));
+
+    ("[E-Binop 1]", ("e1 → e1'   \t e1 op e2 → e1' op e2", ["e1"; "e1'"; "e2"; "op"]));
+    ("[E-Binop 2]", ("e2 → e2'   \t e1 op e2 → e1 op e2'", ["e1"; "e2"; "e2'"; "op"]));
+    ("[E-Op+]",     ("[[e1]] = v1   \t [[e2]] = v2   \t [[e1 + e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op-]",     ("[[e1]] = v1   \t [[e2]] = v2   \t [[e1 - e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op*]",     ("[[e1]] = v1   \t [[e2]] = v2   \t [[e1 * e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op/]",     ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 / e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op=]",     ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 = e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op<>]",    ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 <> e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op<]",     ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 < e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op>]",     ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 > e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op>=]",    ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 >= e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op<=]",    ("[[e1]] = v1   \t [[e2]] = v2   \t v2 <> 0   \t [[e1 <= e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op&&]",    ("[[e1]] = v1   \t [[e2]] = v2   \t [[e1 && e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
+    ("[E-Op||]",    ("[[e1]] = v1   \t [[e2]] = v2   \t [[e1 || e2]] → v", ["e1"; "v1"; "e2"; "v2"; "v";]));
   ]
 ;;
 
@@ -480,6 +594,36 @@ let rec eval (e: term) (envtypes: env): (value * env * ((string * string list) l
       (v, env', step :: rules)
   )
 
+  | BinaryOperation (op, e1, e2) -> (
+    let (t1, rules1) = typeinfer e1 envtypes in
+    let (t2, rules2) = typeinfer e2 envtypes in
+    let (v1, envtypes1, rules3) = eval e1 envtypes in
+    let (v2, envtypes2, rules4) = eval e2 envtypes1 in (match (op, v1, v2) with
+      (* op. binárias aritméticas *)
+      | (Add, VInt i1, VInt i2) -> (VInt (i1 + i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Add", [string_of_value v1; string_of_value v2])])
+      | (Sub, VInt i1, VInt i2) -> (VInt (i1 - i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Sub", [string_of_value v1; string_of_value v2])])
+      | (Mul, VInt i1, VInt i2) -> (VInt (i1 * i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Mul", [string_of_value v1; string_of_value v2])])
+      | (Div, VInt i1, VInt i2) -> 
+          if i2 = 0 then raise (TypeError "Dividing by zero") else (VInt (i1 / i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Div", [string_of_value v1; string_of_value v2])])
+      
+      (* op. binárias relacionais aritméticas *)
+      | (Eq, VInt i1, VInt i2) -> (VBool (i1 = i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Eq", [string_of_value v1; string_of_value v2])])
+      | (Neq, VInt i1, VInt i2) -> (VBool (i1 <> i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Neq", [string_of_value v1; string_of_value v2])])
+      | (Lt, VInt i1, VInt i2) -> (VBool (i1 < i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Lt", [string_of_value v1; string_of_value v2])])
+      | (Gt, VInt i1, VInt i2) -> (VBool (i1 > i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Gt", [string_of_value v1; string_of_value v2])])
+      | (Leq, VInt i1, VInt i2) -> (VBool (i1 <= i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Leq", [string_of_value v1; string_of_value v2])])
+      | (Geq, VInt i1, VInt i2) -> (VBool (i1 >= i2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Geq", [string_of_value v1; string_of_value v2])])
+
+      (* op. binárias relacionais booleanas *)
+      | (Eq, VBool b1, VBool b2) -> (VBool (b1 = b2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Eq", [string_of_value v1; string_of_value v2])])
+      | (Neq, VBool b1, VBool b2) -> (VBool (b1 <> b2), envtypes2, rules1 @ rules2 @ rules3 @ rules4 @ [("E-Neq", [string_of_value v1; string_of_value v2])])
+
+      (*  erro  *)
+      | _ -> raise (TypeError "Malformed term")
+      )
+  )
+
+
     | _ -> raise (TypeError "Malformed term")
   )
 
@@ -508,7 +652,6 @@ let interpret (ex: term list) (env: env) : (value * env) list = List.map (fun e 
 
 
 let _ = interpret ([
-  (*  identity function  *)
-  Function ("x", Int, Identifier "x", Identifier "x");
-  Application (Function ("x", Int, Identifier "x", Identifier "x"), Integer 1);
+  (*  sucessor function *)
+  Application (Function ("x", Int, BinaryOperation(Add, Identifier "x", Integer 1), Identifier "x"), Integer 5);
 ]) ([]);;
