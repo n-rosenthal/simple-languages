@@ -75,6 +75,10 @@ let type_scheme_rules : (string * (string * string list)) list = [
   (* e1 e2 *)
   ("[T-App]",   ("Γ ⊢ e1 : t1 → t2   \t Γ ⊢ e2 : t1   \t Γ ⊢ e1 e2 : t2", 
                 ["e1"; "t1"; "t2"; "e2"; "e1 e2"]));
+
+  (* let rec *)
+  ("[T-RecFn]", ("Γ, f : τ ⊢ e1 : τ   \t Γ, f : τ ⊢ e2 : τ2   \t Γ ⊢ let rec f : τ = e1 in e2 : τ2", 
+                ["f"; "τ"; "e1"; "e2"; "let rec f = e1 in e2"]));
 ];;
 
 (* replace all occurrences of x by x' in s *)
@@ -106,10 +110,10 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
             | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
             | Function        of string * tipo * term * term  (* fun x : t -> e in e2     *)
             | Application     of term * term                  (* e1 e2                    *)
+            | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
 
 (*
   | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
-  | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
 *)
 ;;
 
@@ -142,7 +146,8 @@ let rec string_of_term (e: term) : string = (match e with
     | Identifier x -> x
     | VarDefinition (x, t, e1, e2) -> "let " ^ x ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
     | Function (x, t, e, e2) -> "fun " ^ x ^ " : " ^ string_of_tipo t ^ " -> " ^ string_of_term e ^ " in " ^ string_of_term e2
-    | Application (e1, e2) -> "( " ^ string_of_term e1 ^ " ) @ ( " ^ string_of_term e2 ^ " )" 
+    | Application (e1, e2) -> "( " ^ string_of_term e1 ^ " ) @ ( " ^ string_of_term e2 ^ " )"
+    | RecFunction (f, t, e1, e2) -> "let rec " ^ f ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
   );;
 
 let rec string_of_value (v: value) : string = (match v with
@@ -161,6 +166,7 @@ let rec string_of_value (v: value) : string = (match v with
     | Boolean b -> VBool b
     | Pair (a, b) -> VPair (value_of_term a, value_of_term b)
     | Function (x, t, e, e2) -> VClosure (x, t, e, [])
+    | RecFunction (f, t, e1, e2) -> VRecFn (f, e1)
     | _ -> failwith ("value_of_term: not a value")
   
   (* convert value -> term *)
@@ -169,15 +175,15 @@ let rec string_of_value (v: value) : string = (match v with
     | VInt n -> Integer n
     | VBool b -> Boolean b
     | VPair (v1, v2) -> Pair (term_of_value v1, term_of_value v2)
-    | VClosure (x, t, e, env) ->  failwith ("what is term_of_value function?")
-    | VRecFn (f, e) -> failwith ("term_of_value: not a term")
+    | VClosure (x, t, e, env) ->  e (* ? *)
+    | VRecFn (f, e) -> e (* ? *)
     | _ -> failwith ("term_of_value: not a term")
   ;;
   
   (* is this term already a value? *)
   let rec is_value_term t =
     match t with
-    | Integer _ | Boolean _  | Function _ -> true
+    | Integer _ | Boolean _  | Function _ | RecFunction _ -> true
     | Pair (a, b) -> is_value_term a && is_value_term b
     | _ -> false
   ;;
@@ -278,6 +284,18 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
     )
   )
 
+  (* let rec *)
+  | RecFunction (f, t, e1, e2) ->
+    let (t1, rules1) = typeinfer e1 ((f, e1, t) :: envtypes) in
+    if t1 <> t then
+      raise (TypeError ("Recursive definition type mismatch: " ^
+                        string_of_tipo t ^ " expected, got " ^
+                        string_of_tipo t1));
+    let (t2, rules2) = typeinfer e2 ((f, e2, t) :: envtypes) in
+    (t2,
+    ("[T-LetRec]", [string_of_term (RecFunction (f, t, e1, e2));
+                    string_of_tipo t2]) :: rules1 @ rules2)
+
   | _ -> raise (TypeError "Malformed term")
 );;
 
@@ -319,6 +337,8 @@ let eval_rule_schema : (string * (string * string list)) list = [
     ("[E-App 1]", ("e1 → e1'   \t e1 e2 → e1' e2", ["e1"; "e1'"; "e2"]));
     ("[E-App 2]", ("e2 → e2'   \t (v1 e2) → (v1 e2')", ["e2"; "e2'"; "v1"]));
     ("[E-AppFun]", ("e1 = fun x : t -> e   \t e2 = v2   \t (fun x : t -> e) v2 → e[x ↦ v2]", ["e1"; "e2"; "t"; "x"]));
+
+    ("[E-RecFun]", ("e1 = fun x : t -> e   \t e2 = v2   \t let rec x = e1 in e2 → let rec x = e1 in e2", ["e1"; "e2"; "t"; "x"]));
   ]
 ;;
 
@@ -419,7 +439,7 @@ let rec eval (e: term) (envtypes: env): (value * env * ((string * string list) l
     )
 
     (* e1 e2 *)
-    | Application (e1, e2) -> 
+    | Application (e1, e2) -> (
       if not (is_value_term e1) then
         let (v1, env1, rules1) = eval e1 envtypes in
         let step = ("[E-App1]", [string_of_term (Application (e1, e2));
@@ -441,6 +461,24 @@ let rec eval (e: term) (envtypes: env): (value * env * ((string * string list) l
             let step = ("[E-AppFun]", [string_of_term (Application (e1, e2));
                                       string_of_value v]) in
             (v, env', step :: rules)
+  
+        | _ -> raise (TypeError
+                        ("First argument of application must be a function: "
+                          ^ string_of_term e1
+                          ^ " has type "
+                          ^ string_of_tipo (typeof (value_of_term e1))))
+    )
+    
+  | RecFunction (f, t, e1, e2) -> (
+      (* create recursive closure: f is bound to itself *)
+      let rec_closure = VClosure (f, t, e1, envtypes) in
+      let new_env = (f, term_of_value rec_closure, t) :: envtypes in
+      let (v, env', rules) = eval e2 new_env in
+      let step = ("[E-LetRec]",
+                  [string_of_term (RecFunction (f, t, e1, e2));
+                  string_of_value v]) in
+      (v, env', step :: rules)
+  )
 
     | _ -> raise (TypeError "Malformed term")
   )
