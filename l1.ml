@@ -27,7 +27,18 @@ exception RuntimeError of string;;
   1.  Criação do tipo `binop` para representar operações binárias
   2.  Extensão da sintaxe de termos
   3.  Inferência estática de tipos; avaliação; interpretador;
-  =========================================================== *)
+  ============================================================= *)
+
+(* ============================================================
+  L1_arith ++ common_types 
+  Extensão de L1 para incluir tipos de dados comuns:
+    - T list
+    - T array
+    - record
+    - Unit
+  
+  termos: `Nil`, `Cons`, `Match`; `Nothing` (termo unit); location
+  ============================================================  *)
 
 (* operadores binários sobre inteiros ou booleanos *)
 type binop =
@@ -59,6 +70,11 @@ type tipo =
   | OrderedPair of tipo * tipo
   | Arrow       of tipo * tipo        (* tipo função*)
   | RecursiveFn of tipo               (* tipo função recursiva *)
+  
+  (* common-types extension *)
+  | List        of tipo
+  | Array       of tipo
+;;
 
 (* --- string repr. tipos --------------------------------------- *)
 (* repr. string de tipos *)
@@ -68,6 +84,10 @@ let rec string_of_tipo (t: tipo) : string = match t with
   | OrderedPair (t1, t2) -> string_of_tipo t1 ^ " * " ^ string_of_tipo t2
   | Arrow (t1, t2) -> "(" ^ string_of_tipo t1 ^ " → " ^ string_of_tipo t2 ^ ")"
   | RecursiveFn t1 -> "(" ^ string_of_tipo t1 ^ " → " ^ string_of_tipo t1 ^ ")"
+
+  (* common-types extension *)
+  | List t -> string_of_tipo t ^ " list"
+  | Array t -> string_of_tipo t ^ " array"
 ;;
 
 
@@ -182,6 +202,19 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
             | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
             | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
 
+            (* common-types extension *)
+            | Nil                                             (* nil                      *)
+            | Cons            of term * term                  (* e1 :: e2                 *)
+            | Reference       of term                         (* &e                       *)
+            | Deref           of term                         (* !e                       *)
+            | Assignment      of term * term                  (* e1 := e2                 *)
+
+            (* common-types extension: arrays *)
+            | ArrayMake       of term * term                  (* Array.make n e                   *)
+                                                              (* @requires n : Int && [[n]] >= 0  *)
+            | ArrayGet        of term * term                  (* Array.get a i,   a.(i)           *)
+            | ArraySet        of term * term * term           (* Array.set a i e, a.(i) := e      *)
+
 (*
 *)
 ;;
@@ -202,7 +235,13 @@ type value =
   | VPair     of value * value
   | VClosure  of string * tipo * term * env (* fun x : t -> e *) (* valor função*)
   | VRecFn    of string * term
+  | VRef      of location
+  | VArray    of location
+and location = int
 ;;
+
+type memory = (location, value array) Hashtbl.t
+let next_loc = ref 0;;
 
 (*  repr. string de um termo em L1 *)
 let rec string_of_term (e: term) : string = (match e with
@@ -218,6 +257,15 @@ let rec string_of_term (e: term) : string = (match e with
     | Application (e1, e2) -> "( " ^ string_of_term e1 ^ " ) @ ( " ^ string_of_term e2 ^ " )"
     | RecFunction (f, t, e1, e2) -> "let rec " ^ f ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
     | BinaryOperation (op, e1, e2) -> string_of_term e1 ^ " " ^ string_of_binop op ^ " " ^ string_of_term e2
+    | Nil -> "[]"
+    | Cons (e1, e2) -> string_of_term e1 ^ " :: " ^ string_of_term e2
+    | Reference e -> "&" ^ string_of_term e
+    | Deref e -> "!" ^ string_of_term e
+    | Assignment (e1, e2) -> string_of_term e1 ^ " := " ^ string_of_term e2
+
+    | ArrayMake (e1, e2) -> "Array.make " ^ string_of_term e1 ^ " " ^ string_of_term e2 
+    | ArrayGet (e1, e2) -> "Array.get " ^ string_of_term e1 ^ " " ^ string_of_term e2
+    | ArraySet (e1, e2, e3) -> "Array.set " ^ string_of_term e1 ^ " " ^ string_of_term e2 ^ " " ^ string_of_term e3
   );;
 
 let rec string_of_value (v: value) : string = (match v with
@@ -226,6 +274,9 @@ let rec string_of_value (v: value) : string = (match v with
     | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
     | VClosure (x, t, e, env) -> "fun " ^ x ^ " : " ^ string_of_tipo t ^ " -> " ^ string_of_term e
     | VRecFn (f, e) -> "rec " ^ f ^ " -> " ^ string_of_term e
+
+    | VRef loc -> "ref " ^ string_of_int loc
+    | VArray loc -> "array " ^ string_of_int loc  
   );;
 
 
@@ -247,6 +298,8 @@ let rec string_of_value (v: value) : string = (match v with
     | VPair (v1, v2) -> Pair (term_of_value v1, term_of_value v2)
     | VClosure (x, t, e, env) ->  e (* ? *)
     | VRecFn (f, e) -> e (* ? *)
+    | VRef loc -> Integer loc
+    | VArray loc -> Integer loc
     | _ -> failwith ("term_of_value: not a term")
   ;;
   
@@ -652,6 +705,20 @@ let interpret (ex: term list) (env: env) : (value * env) list = List.map (fun e 
 
 
 let _ = interpret ([
-  (*  sucessor function *)
-  Application (Function ("x", Int, BinaryOperation(Add, Identifier "x", Integer 1), Identifier "x"), Integer 5);
-]) ([]);;
+  (*  f n = n (n - 1) *)
+  Application(
+    Function ("x", Int, 
+      BinaryOperation(
+        Mul,
+        Identifier "x",
+        BinaryOperation(
+          Sub,
+          Identifier "x",
+          Integer 1
+      )),
+      Identifier "x"),
+    Integer (-1)
+  )
+
+  ]) ([]);
+
