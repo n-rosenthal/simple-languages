@@ -28,8 +28,8 @@ type tipo =
   | Bool
   | Int
   | OrderedPair of tipo * tipo
-  | Arrow       of tipo * tipo
-  | RecursiveFn of tipo  (* restricted: t → t *)
+  | Arrow       of tipo * tipo        (* tipo função*)
+  | RecursiveFn of tipo               (* tipo função recursiva *)
 
 (* --- string repr. tipos --------------------------------------- *)
 (* repr. string de tipos *)
@@ -68,7 +68,13 @@ let type_scheme_rules : (string * (string * string list)) list = [
   ("[T-Let]",   ("Γ ⊢ e1 : T, Γ[x |→ T'] ⊢ e2 : T' --> Γ ⊢ let x : T = e1 in e2 : T' ",
                 ["e1"; "t1"; "x"; "e2"; "t2"; "let x = e1 in e2"]));
   
+  (* fun x : t = e1 [in e2] *)
+  ("[T-Fun]",   ("Γ ⊢ e1 : t, Γ[x |→ t] ⊢ e2 : t' --> Γ ⊢ fun x : t = e1 [in e2] : t' ",
+                ["e1"; "t1"; "x"; "e2"; "t2"; "fun x = e1 [in e2]"]));
   
+  (* e1 e2 *)
+  ("[T-App]",   ("Γ ⊢ e1 : t1 → t2   \t Γ ⊢ e2 : t1   \t Γ ⊢ e1 e2 : t2", 
+                ["e1"; "t1"; "t2"; "e2"; "e1 e2"]));
 ];;
 
 (* replace all occurrences of x by x' in s *)
@@ -89,29 +95,39 @@ let get_typerule (rule_name: string) (concretes: string list) : (string, exn) re
 (* ============================================================= 
   Sintaxe de EXPRESSÕES (termos) sobre L1
   ============================================================== *)
-  type term =
-  | Integer         of int                          (* valor: inteiro           *)
-  | Boolean         of bool                         (* valor: booleano          *)
-  | Pair            of term * term                  (* valor: par v,u           *)
-  | Snd             of term                         (* snd e                    *)
-  | Fst             of term                         (* fst e                    *)
-  | Conditional     of term * term * term           (* if e1 then e2 else e3    *)
-  | Identifier      of string                       (* x, identificador         *)
-  | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
+            type term =
+            | Integer         of int                          (* valor: inteiro           *)
+            | Boolean         of bool                         (* valor: booleano          *)
+            | Pair            of term * term                  (* valor: par v,u           *)
+            | Snd             of term                         (* snd e                    *)
+            | Fst             of term                         (* fst e                    *)
+            | Conditional     of term * term * term           (* if e1 then e2 else e3    *)
+            | Identifier      of string                       (* x, identificador         *)
+            | VarDefinition   of string * tipo * term * term  (* let x : t = e1 in e2     *)
+            | Function        of string * tipo * term * term  (* fun x : t -> e in e2     *)
+            | Application     of term * term                  (* e1 e2                    *)
 
 (*
   | BinaryOperation of binop  * term * term         (* e1 op e2                 *)
-  | Application     of term * term                  (* e1 e2                    *)
-  | Function        of string * tipo * term         (* fun x : t -> e           *)
   | RecFunction     of string * tipo * term * term  (* let rec f : t = e1 in e2 *)
 *)
 ;;
+
+(* --- ambiente de tipos ---------------------------------------- *)
+type env = (string * term * tipo) list;;
+
+(* busca por um identificador `x` no ambiente de tipos Γ e retorna o seu tipo `t`, se existir *)
+let rec lookup (x: string) (envtypes: env) : (term * tipo)  option = (
+  match envtypes with
+  | [] -> None
+  | (y, e, t)::tl -> if x = y then Some (e, t) else lookup x tl 
+);;
 
 type value =
   | VInt      of int
   | VBool     of bool
   | VPair     of value * value
-  | VFn       of string * term
+  | VClosure  of string * tipo * term * env (* fun x : t -> e *) (* valor função*)
   | VRecFn    of string * term
 ;;
 
@@ -125,13 +141,15 @@ let rec string_of_term (e: term) : string = (match e with
     | Snd e -> "snd " ^ string_of_term e
     | Identifier x -> x
     | VarDefinition (x, t, e1, e2) -> "let " ^ x ^ " : " ^ string_of_tipo t ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
+    | Function (x, t, e, e2) -> "fun " ^ x ^ " : " ^ string_of_tipo t ^ " -> " ^ string_of_term e ^ " in " ^ string_of_term e2
+    | Application (e1, e2) -> "( " ^ string_of_term e1 ^ " ) @ ( " ^ string_of_term e2 ^ " )" 
   );;
 
 let rec string_of_value (v: value) : string = (match v with
     | VInt i -> string_of_int i
     | VBool b -> string_of_bool b
     | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
-    | VFn (x, e) -> "fun " ^ x ^ " -> " ^ string_of_term e
+    | VClosure (x, t, e, env) -> "fun " ^ x ^ " : " ^ string_of_tipo t ^ " -> " ^ string_of_term e
     | VRecFn (f, e) -> "rec " ^ f ^ " -> " ^ string_of_term e
   );;
 
@@ -142,6 +160,7 @@ let rec string_of_value (v: value) : string = (match v with
     | Integer n -> VInt n
     | Boolean b -> VBool b
     | Pair (a, b) -> VPair (value_of_term a, value_of_term b)
+    | Function (x, t, e, e2) -> VClosure (x, t, e, [])
     | _ -> failwith ("value_of_term: not a value")
   
   (* convert value -> term *)
@@ -150,7 +169,7 @@ let rec string_of_value (v: value) : string = (match v with
     | VInt n -> Integer n
     | VBool b -> Boolean b
     | VPair (v1, v2) -> Pair (term_of_value v1, term_of_value v2)
-    | VFn (x, e) -> failwith ("term_of_value: not a term")
+    | VClosure (x, t, e, env) ->  failwith ("what is term_of_value function?")
     | VRecFn (f, e) -> failwith ("term_of_value: not a term")
     | _ -> failwith ("term_of_value: not a term")
   ;;
@@ -158,21 +177,13 @@ let rec string_of_value (v: value) : string = (match v with
   (* is this term already a value? *)
   let rec is_value_term t =
     match t with
-    | Integer _ | Boolean _ -> true
+    | Integer _ | Boolean _  | Function _ -> true
     | Pair (a, b) -> is_value_term a && is_value_term b
     | _ -> false
   ;;
   
 
-(* --- ambiente de tipos ---------------------------------------- *)
-type env = (string * term * tipo) list;;
 
-(* busca por um identificador `x` no ambiente de tipos Γ e retorna o seu tipo `t`, se existir *)
-let rec lookup (x: string) (envtypes: env) : (term * tipo)  option = (
-  match envtypes with
-  | [] -> None
-  | (y, e, t)::tl -> if x = y then Some (e, t) else lookup x tl 
-);;
 
 
 
@@ -243,6 +254,30 @@ let rec typeinfer (e: term) (envtypes: env) : (tipo * (string * string list) lis
     (t2, rules)
   )
 
+  (* fun x : t -> e *)
+  | Function (x, t, body, e2) -> (
+    let (t2, rules) = typeinfer body ((x, body, t) :: envtypes) in
+    (Arrow (t, t2), ("[T-Fun]", [string_of_term (Function (x, t, body, e2));
+                                  string_of_term body;
+                                  string_of_tipo (Arrow (t, t2))]) :: rules)
+  )
+
+  (* e1 e2 *)
+  | Application (e1, e2) -> (
+    let (t_fun, rules') = typeinfer e1 envtypes in
+    let (t_arg, rules'') = typeinfer e2 envtypes in
+    (match t_fun with
+      | Arrow (t', t'') -> (
+          if t_arg = t' then
+            (t'', rules' @ rules'' @ [("T-App", [string_of_term e1; string_of_term e2; string_of_term e])])
+          else
+            raise (TypeError ("Argument type does not match function type. Expected " ^ string_of_tipo t' ^ " but got " ^ string_of_tipo t_arg))
+      )
+
+      | _ -> raise (TypeError ("First argument of application must be a function, got " ^ string_of_term e1))
+    )
+  )
+
   | _ -> raise (TypeError "Malformed term")
 );;
 
@@ -278,6 +313,12 @@ let eval_rule_schema : (string * (string * string list)) list = [
 
     ("[E-Let 1]", ("e1 → e1'   \t let x = e1 in e2 → let x = e1' in e2", ["e1"; "e1'"; "e2"; "x"]));
     ("[E-Let 2]", ("let x:T = v in e2 --> {v/x}e2", ["v"; "e2"; "x"; "T"]));
+
+    ("[E-Fun]", ("e1 → e1'   \t fun x -> e1 → fun x -> e1'", ["e1"; "e1'"]));
+
+    ("[E-App 1]", ("e1 → e1'   \t e1 e2 → e1' e2", ["e1"; "e1'"; "e2"]));
+    ("[E-App 2]", ("e2 → e2'   \t (v1 e2) → (v1 e2')", ["e2"; "e2'"; "v1"]));
+    ("[E-AppFun]", ("e1 = fun x : t -> e   \t e2 = v2   \t (fun x : t -> e) v2 → e[x ↦ v2]", ["e1"; "e2"; "t"; "x"]));
   ]
 ;;
 
@@ -372,6 +413,35 @@ let rec eval (e: term) (envtypes: env): (value * env * ((string * string list) l
                       [("E-Let 2", [string_of_value v2; string_of_term e2; x; string_of_tipo t])])
     )
 
+    (* fun x : t -> e *)
+    | Function (x, t, e, e2) -> (
+        (VClosure (x, t, e, envtypes), envtypes, [("E-Fun", [x; string_of_tipo t; string_of_term e])])
+    )
+
+    (* e1 e2 *)
+    | Application (e1, e2) -> 
+      if not (is_value_term e1) then
+        let (v1, env1, rules1) = eval e1 envtypes in
+        let step = ("[E-App1]", [string_of_term (Application (e1, e2));
+                                string_of_term (Application (term_of_value v1, e2))]) in
+        (v1, env1, step :: rules1)
+  
+      else if not (is_value_term e2) then
+        let (v2, env2, rules2) = eval e2 envtypes in
+        let step = ("[E-App2]", [string_of_term (Application (e1, e2));
+                                string_of_term (Application (e1, term_of_value v2))]) in
+        (v2, env2, step :: rules2)
+  
+      else
+        match value_of_term e1 with
+        | VClosure (x, t, body, closure_env) ->
+            let v2 = value_of_term e2 in
+            let new_env = (x, term_of_value v2, t) :: closure_env in
+            let (v, env', rules) = eval body new_env in
+            let step = ("[E-AppFun]", [string_of_term (Application (e1, e2));
+                                      string_of_value v]) in
+            (v, env', step :: rules)
+
     | _ -> raise (TypeError "Malformed term")
   )
 
@@ -391,6 +461,7 @@ let interpret (e: term) (env: env) : (value * env) = (
   print_endline ("type: `" ^ string_of_tipo t ^ "`");
   print_rules "Type inference" rules;
   print_rules "Evaluation" rules';
+  print_endline "==="; print_endline ("value: `" ^ string_of_value v ^ "`"); print_endline "===";
   (v, env')
 )
 
@@ -399,16 +470,7 @@ let interpret (ex: term list) (env: env) : (value * env) list = List.map (fun e 
 
 
 let _ = interpret ([
-  VarDefinition ("x", Int, Integer 1,
-    VarDefinition ("y", Int, Integer 2,
-      Conditional(
-        Fst(
-          Pair(
-            Boolean true,
-            Identifier "x"
-          )
-        ),
-        Identifier "x",
-        Identifier "y"
-      )))
+  (*  identity function  *)
+  Function ("x", Int, Identifier "x", Identifier "x");
+  Application (Function ("x", Int, Identifier "x", Identifier "x"), Integer 1);
 ]) ([]);;
