@@ -2,3 +2,8 @@
 /LZero.mli
 /arith
 /arith.ml
+*.cmi
+*.cmo
+*.o
+*.cmx
+*.cmxa
