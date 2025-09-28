@@ -44,39 +44,32 @@ let rec eval (e: Terms.term) (env: env) (types: Types.env) : (Terms.value * env)
     (* fst e *)
   | Terms.Fst e -> (match (eval e env types) with
     | (Terms.VPair (v1, v2), env1) -> (v1, env1)
-    | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`")))
+    | _ -> (Error ("argument `e` of `fst e` must be a pair, got `" ^ Terms.string_of_ast e ^ "`"), env))
 
     (* snd e *)
   | Terms.Snd e -> (match (eval e env types) with
     | (Terms.VPair (v1, v2), env1) -> (v2, env1)
-    | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`")))
+    | _ -> (Error ("argument `e` of `snd e` must be a pair, got `" ^ Terms.string_of_ast e ^ "`"), env))
   
   (* if e1 then e2 else e3 *)
   | Terms.Conditional (e1, e2, e3) -> (match (eval e1 env types) with
     | (Terms.VBool b, env1) -> if b then (eval e2 env1 types) else (eval e3 env1 types)
-    | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`")))
+    | _ -> (Error ("argument `e1` of `if e1 then e2 else e3` must be a boolean, got `" ^ Terms.string_of_ast e1 ^ "`"), env))
 
   (* let x = e1 in e2 *)
   | Terms.VarDefinition (nb, e2) -> (
-      let (e1, x) = nb in (
-        match (Types.typeinfer e1 types) with
-        | Ok (t1, types', _) -> (
-          match (eval e1 env types') with
-          | (v1, env1) -> (
-            match (eval e2 ((e1, v1, x)::env1) types') with
-            | (v2, env2) -> (v2, env2)
-            | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`"))
-          )
-          | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`"))
-        )
-        | Error exn -> raise exn
-        )
-    )
+      let (e1, x) = nb in (match (Types.typeinfer e1 types) with
+        | (Types.Exception s, _, _) -> (Error s, env)
+        | (t1, _, _) -> let (v1, env1) = eval e1 env types in
+                        let new_env = (e1, v1, x) :: env1 in
+                        (eval e2 new_env types)
+        | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`"))
+      ))
 
     (* x *)
   | Terms.Identifier x -> (match (lookup x env) with
     | Some (e1, v1, x1) -> (v1, env)
-    | None -> raise (RuntimeError ("Unbound identifier `" ^ x ^ "`")))
+    | None -> (Error ("unbound variable `" ^ x ^ "`"), env))
 
 | _ -> raise (RuntimeError ("cannot evaluate `" ^ Terms.string_of_term e ^ "`"))
 );;

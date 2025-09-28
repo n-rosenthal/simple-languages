@@ -15,8 +15,7 @@ let print_term (e: Terms.term) : unit =
     size depth consts;
 
   (* Type inference *)
-  (match Types.typeinfer e [] with
-  | Ok (t, env, rules) ->
+  (let t, env, rules = Types.typeinfer e [] in
       Printf.printf "tipo:\n (%s) : %s\n\n"
         (Terms.string_of_term e)
         (Types.string_of_tipo t);
@@ -24,16 +23,15 @@ let print_term (e: Terms.term) : unit =
       (* ambiente de tipos *)
       Printf.printf "ambiente de tipos: %s\n\n" (Types.string_of_env env);
 
-      (* esquemas de regras de inferência substituídos pelos {termos, valores, tipos} *)
+      (** esquemas de regras de inferência substituídos pelos {termos, valores, tipos} 
       List.iteri (fun index (r, t) ->
         let rule' = Repr.substitute (Repr.get_rule r) t in
         Printf.printf "(%3d) {%15s} %s\n" (index+1) r rule') rules
       ;
+      *)
 
-      print_endline ""; 
-
-  | Error exn ->
-      Printf.printf "Error: %s\n\n" (Types.string_of_exn exn));
+      print_endline "";
+    );
 
   (* Evaluation *)
   let v, env = Eval.eval e [] [] in

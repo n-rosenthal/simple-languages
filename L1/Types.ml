@@ -8,6 +8,7 @@ type tipo =
   | Bool
   | Int
   | Pair of tipo * tipo
+  | Exception of string         (*  Error é o tipo de um termo Exception x (equiv. valor Error x)*)
 ;;
 
 (* repr. string de um tipo *)
@@ -16,6 +17,7 @@ let rec string_of_tipo (t: tipo) : string = match t with
   | Bool -> "bool"
   | Int -> "int"
   | Pair (t1, t2) -> "(" ^ string_of_tipo t1 ^ " * " ^ string_of_tipo t2 ^ ")"
+  | Exception s -> "Error " ^ s
 ;;
 
 
@@ -58,110 +60,62 @@ let string_of_exn (error: exn) : string = match error with
 
 (*  dado um termo `e`, infere seu tipo `⊢ e : T`, armazenando as regras utilizidadas.
     retorna um resultado Ok (T, regras) ou Error (exceção) *)
-    let rec typeinfer (e: Terms.term) (env: env) : (tipo * env * Repr.schema list, exn) result =
-  match e with
-  (* Unit (), None *)
-  | Terms.None -> Ok (NoneType, env, [("T-Unit", [])])
+    let rec typeinfer (e: Terms.term) (env: env) : (tipo * env * Repr.schema list) = (match e with
+      (* Unit ()*)
+      | Terms.None -> (NoneType, env, [])
 
-  (* Integer n *)
-  | Terms.Integer n -> Ok (Int, env, [("T-Int", [Terms.string_of_term e; string_of_env env])])
+      (* Integer n *)
+      | Terms.Integer _ -> (Int, env, [("T-Int", [Terms.string_of_term e])])
 
-  (* Boolean b *)
-  | Terms.Boolean b -> Ok (Bool, env, [("T-Bool", [Terms.string_of_term e; string_of_env env])])
+      (* Boolean b *)
+      | Terms.Boolean _ -> (Bool, env, [("T-Bool", [Terms.string_of_term e])])
 
-  (* (e1, e2) *)
-  | Terms.OrderedPair (e1, e2) -> (match typeinfer e1 env with
-    | Ok (t1, env1, rules1) -> (match typeinfer e2 env1 with
-      | Ok (t2, env2, rules2) -> Ok (Pair (t1, t2), env2, rules1 @ 
-                                                          rules2 @ 
-                                                          [("T-OrderedPair", [
-                                                            Terms.string_of_term e1; string_of_tipo t1;
-                                                            Terms.string_of_term e2; string_of_tipo t2;
-                                                            Terms.string_of_term e; 
-                                                            string_of_env env
-                                                          ])])
-      | Error exn -> Error exn)
-    | Error exn -> Error exn)
+      (* (e1, e2) *)
+      | Terms.OrderedPair (e1, e2) -> let (t1, env1, rules1) = typeinfer e1 env in
+                                      let (t2, env2, rules2) = typeinfer e2 env1 in
+                                      (Pair (t1, t2), env2, rules1 @ rules2 @ [("T-OrderedPair", [Terms.string_of_term e1; string_of_tipo t1; Terms.string_of_term e2; string_of_tipo t2; Terms.string_of_term e])])
 
-  (* fst e *)
-  | Terms.Fst e -> (match typeinfer e env with
-    | Ok (Pair (t1, t2), env1, rules1) -> Ok (t1, env1, rules1 @ 
-                                                        [("T-Fst", [
-                                                          Terms.string_of_term e; 
-                                                          string_of_tipo t1;
-                                                          string_of_tipo t2;
-                                                          string_of_env env
-                                                        ])])
-    | Ok (t, env1, rules1) -> Error (TypeError ("argument of `fst e` must be a pair", Some e))
-    | Error exn -> Error exn)
-
-  (* snd e *)
-  | Terms.Snd e -> (match typeinfer e env with
-    | Ok (Pair (t1, t2), env1, rules2) -> Ok (t2, env1, rules2 @ [("T-Snd", [
-                                                                  Terms.string_of_term e; 
-                                                                  string_of_tipo t1;
-                                                                  string_of_tipo t2;
-                                                                  string_of_env env
-                                                                ])])
-    | Ok (t, env1, rules1) -> Error (TypeError ("argument of `snd e` must be a pair", Some e))
-    | Error exn -> Error exn)
-
-  (* if e1 then e2 else e3 *)
-  | Terms.Conditional (e1, e2, e3) -> (match typeinfer e1 env with
-    | Ok (Bool, env', rules1) -> (match typeinfer e2 env' with
-      | Ok (t2, env'', rules2) -> (match typeinfer e3 env'' with
-        | Ok (t3, env''', rules3) -> (match t2, t3 with
-          | t2, t3 when t2 = t3 -> Ok (t2, env''', rules1 @ rules2 @ rules3 @ [("T-If", [
-            Terms.string_of_term e1;
-            Terms.string_of_term e2;
-            Terms.string_of_term e3;
-            string_of_tipo t2;
-            string_of_env env
-          ])])
-          | t2, t3 -> Error (TypeError ("branches of `if e1 then e2 else e3` must have same type", Some e))
-        )
-        | Error exn -> Error exn)
-      | Error exn -> Error exn)
-    | Ok (t, env', rules') -> Error (TypeError ("condition of `if e1 then e2 else e3` must be a boolean", Some e))
-    | Error exn -> Error exn)
-
-  | Terms.Identifier x -> (match lookup x env with
-    | Some (e', t) -> Ok (t, env, [("T-Var", [
-                                              x;
-                                              string_of_tipo t;
-                                              string_of_env env
-                                            ])])
-    | None -> Error (TypeError ("Unbound identifier `" ^ x ^ "`", Some e)))
-
-  (* let x = e1 in e2 *)
-  | Terms.VarDefinition (nb, e2) -> 
-    (*  verifica se o binding `nb` está no ambiente atual; se sim, verifica igualdade e atualiza se necessário; senão, adiciona *)
-    (match lookup (snd nb) env with
-    | Some (e1, t1) -> (match typeinfer e1 env with
-      | Ok (t2, env1, rules1) -> (match t1, t2 with
-        | t1, t2 when t1 = t2 -> Ok (t1, env1, rules1 @ [("T-Let", [
-          Terms.string_of_term e1;
-          string_of_tipo t1;
-          snd nb;
-          Terms.string_of_term e2;
-          string_of_tipo t2;
-          string_of_env env
-        ])])
-        | t1, t2 -> Error (TypeError ("bindings of `let x = e1 in e2` must have same type", Some e))
+      (* fst e *)
+      | Terms.Fst e -> (match (typeinfer e env) with
+        | (Pair (t1, t2), env1, rules) -> (t1, env1, rules @ [("T-Fst", [Terms.string_of_term e; Terms.string_of_term e])])
+        | _ -> (Exception "TypeError: argument of `fst e` must be a pair", env, [("T-Fst", [Terms.string_of_term e; Terms.string_of_term e])])
       )
-      | Error exn -> Error exn)
-    | None -> (match typeinfer (fst nb) env with
-      | Ok (t1, env1, rules1) -> (match typeinfer e2 ((nb, t1) :: env1) with
-        | Ok (t2, env', rules2) -> Ok (t2, env', rules1 @ rules2 @ [("T-Let", [
-          Terms.string_of_term (fst nb);
-          string_of_tipo t1;
-          snd nb;
-          Terms.string_of_term e2;
-          string_of_tipo t2;
-          string_of_env env
-        ])])
-        | Error exn -> Error exn)
-      | Error exn -> Error exn))
 
-  | _ -> Error (TypeError ("typeinfer failed", Some e))
+      (* snd e *)
+      | Terms.Snd e -> (match (typeinfer e env) with
+        | (Pair (t1, t2), env1, rules) -> (t2, env1, rules @ [("T-Snd", [Terms.string_of_term e; Terms.string_of_term e])])
+        | _ -> (Exception "TypeError: argument of `snd e` must be a pair", env, [("T-Snd", [Terms.string_of_term e; Terms.string_of_term e])])
+      )
+
+      (* if e1 then e2 else e3 *)
+      | Terms.Conditional (e1, e2, e3) -> (match (typeinfer e1 env) with
+        | (Bool, env1, rules1) -> (
+          let (t2, env2, rules2) = typeinfer e2 env1 in
+          let (t3, env3, rules3) = typeinfer e3 env2 in
+          (match (t2, t3) with
+            | (t2, t3) when t2 = t3 -> (t2, env3, rules1 @ rules2 @ rules3 @ [("T-If", [Terms.string_of_term e1; Terms.string_of_term e2; Terms.string_of_term e3])])
+            | _ -> ((Exception ("TypeError: branches of `if e1 then e2 else e3` must have the same type, got `e2: " ^ string_of_tipo t2 ^ "` and `e3: " ^ string_of_tipo t3 ^ "`")), env, [("T-If", [Terms.string_of_term e1; Terms.string_of_term e2; Terms.string_of_term e3])])
+          )
+        )
+        | _ -> (Exception ("TypeError: first argument of `if e1 then e2 else e3` must be a boolean, got `" ^ Terms.string_of_ast e1 ^ "`"), env, [("T-If", [Terms.string_of_term e1; Terms.string_of_term e2; Terms.string_of_term e3])])
+      )
+
+      (* x *)
+      | Terms.Identifier x -> (match (lookup x env) with
+        | Some (e1, t1) -> (t1, env, [("T-Var", [Terms.string_of_term e1; Terms.string_of_term e])])
+        | None -> (Exception ("unbound variable `" ^ x ^ "`"), env, [("T-Var", [Terms.string_of_term e; Terms.string_of_term e])])
+      )
+
+      (* let x = e1 in e2 *)
+      | Terms.VarDefinition (nb, e2) -> (match nb with
+        | (e1, x) -> (
+            let (t1, env', rules') = typeinfer e1 env in 
+            let env'' = (nb, t1) :: env' in
+            let (t2, env'', rules'') = typeinfer e2 env'' in
+            (t2, env'', rules' @ rules'' @ [("T-VarDefinition", [Terms.string_of_term e1; Terms.string_of_term e2; Terms.string_of_term e])]))
+        | _ -> raise (TypeError ("cannot typeinfer `" ^ Terms.string_of_term e ^ "`", Some e))
+      )
+
+    | _ -> raise (TypeError ("cannot typeinfer `" ^ Terms.string_of_term e ^ "`", Some e))
+    )
 ;;

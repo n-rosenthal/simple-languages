@@ -20,6 +20,13 @@ type term =
   | Conditional of term * term * term       (* if e1 then e2 else e3 *)
   | Identifier of string                    (* x, identificador, var *)
   | VarDefinition of binding * term         (* let x = e1 in e2 *)
+
+  (* extension: exception and error handling *)
+  | TryWith of term * term                  (* try e1 with e2 *)
+  | Raise of term                           (* raise e1 *)
+
+
+
 and binding = term * string;;               (*  name binding, associação de um termo a um nome *)
 
 
@@ -36,6 +43,8 @@ let rec string_of_term (e: term) : string =
   | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
   | Identifier x -> x
   | VarDefinition (b, e) -> "let " ^ string_of_binding b ^ " in " ^ string_of_term e
+  | TryWith (e1, e2) -> "try " ^ string_of_term e1 ^ " with " ^ string_of_term e2
+  | Raise e -> "raise " ^ string_of_term e
     and string_of_binding (b: binding) : string =
       let (e, x) = b in
       "'" ^ x ^ "' = " ^ string_of_term e
@@ -53,7 +62,8 @@ let rec string_of_ast (e: term) : string =
   | Conditional (e1, e2, e3) -> "(Conditional (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ ", " ^ string_of_ast e3 ^ "))"
   | Identifier x -> "(Identifier " ^ x ^ ")"
   | VarDefinition (b, e) -> "(VarDefinition (" ^ string_of_binding b ^ ", " ^ string_of_ast e ^ "))"
-
+  | TryWith (e1, e2) -> "(TryWith (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ "))"
+  | Raise e -> "(Raise " ^ string_of_ast e ^ ")"
 
 let rec size (e: term) : int =
   match e with
@@ -70,6 +80,8 @@ let rec size (e: term) : int =
   | Conditional (e1, e2, e3) -> size e1 + size e2 + size e3 + 1
   | Identifier _ -> 1
   | VarDefinition (b, e) -> (size (fst b) + size e)
+  | TryWith (e1, e2) -> size e1 + size e2 + 1
+  | Raise e -> size e + 1
 ;;
 
 let rec depth (e: term) : int =
@@ -87,6 +99,8 @@ let rec depth (e: term) : int =
   | Conditional (e1, e2, e3) -> max (depth e1) (max (depth e2) (depth e3)) + 1
   | Identifier _ -> 1
   | VarDefinition (b, e) -> max (depth (fst b)) (depth e)
+  | TryWith (e1, e2) -> max (depth e1) (depth e2) + 1
+  | Raise e -> depth e + 1
 ;;
 
 let rec constants (e : term) : string list =
@@ -102,6 +116,8 @@ let rec constants (e : term) : string list =
   | Conditional (e1, e2, e3) -> constants e1 @ constants e2 @ constants e3
   | Identifier _ -> []
   | VarDefinition (b, e) -> constants (fst b) @ constants e
+  | TryWith (e1, e2) -> constants e1 @ constants e2
+  | Raise e -> constants e
 ;;
 
 
@@ -112,6 +128,7 @@ type value =
   | VInt of int                             (* n *)
   | VBool of bool                           (* b *)
   | VPair of value * value                  (* (v1, v2) *)
+  | Error of string                         (* error is the value of a term Exception x *)
 ;;
 
 (*  repr. string de um valor `v` *)
@@ -121,6 +138,7 @@ let rec string_of_value (v: value) : string =
   | VInt n          -> string_of_int n
   | VBool b         -> string_of_bool b
   | VPair (v1, v2)  -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
+  | Error s         -> "error " ^ s
 ;;
 
 (*  ValueError ::= erro na avaliação de um termo enquanto valor *)
@@ -181,6 +199,19 @@ let rec value_of_term (e: term) : value option =
     | VarDefinition (nb, e) -> (
       match value_of_term (fst nb) with
       | Some _ -> value_of_term e
+      | None -> None
+    )
+
+    | TryWith (e1, e2) -> (
+      match value_of_term e1 with
+      | Some _ -> value_of_term e1
+      | None -> value_of_term e2
+    )
+
+    | Raise e -> (
+      match value_of_term e with
+      | Some (Error s) -> Some (Error s)
+      | Some _ -> None
       | None -> None
     )
 
