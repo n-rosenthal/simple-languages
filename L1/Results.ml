@@ -1,33 +1,38 @@
-(*
-  Pretty-printing de resultados
-*)
+(* Pretty-printing of results *)
 
 let print_term (e: Terms.term) : unit =
-  (* `e` *)
-  print_endline ("expr: " ^ Terms.string_of_term e ^ "\n" ^ Terms.string_of_ast e);
+  (* Expression and AST *)
+  Printf.printf "expr: %s\nAST: %s\n\n"
+    (Terms.string_of_term e)
+    (Terms.string_of_ast e);
 
-  (* `size(t)`, `depth(t)`, `constants(t)` *)
-  print_endline ("\t(size: " ^ (string_of_int (Terms.size e)));
-  print_endline ("\t(depth: " ^ (string_of_int (Terms.depth e)));
-  print_endline ("\t(constants: " ^ (String.concat ", " (Terms.constants e)) ^ ")");
-  print_endline "";
+  (* size, depth, constants *)
+  let size  = Terms.size e in
+  let depth = Terms.depth e in
+  let consts = Terms.constants e |> String.concat ", " in
+  Printf.printf "\tsize: %d\n\tdepth: %d\n\tconstants: [%s]\n\n"
+    size depth consts;
 
-  match (Types.typeinfer e) with
-  | Ok (t, rules) -> (
-    (* `t` *)
-    print_endline ("(" ^ (Terms.string_of_term e) ^ " : " ^ (Types.string_of_tipo t) ^ ")");
+  (* Type inference *)
+  match Types.typeinfer e [] with
+  | Ok (t, env, rules) ->
+      Printf.printf "(%s : %s)\n\n"
+        (Terms.string_of_term e)
+        (Types.string_of_tipo t);
 
-    (* `rules` *)
-    print_endline "";
-    List.iter
-      (fun (rule, terms) ->
-        Printf.printf "%s\n\t%s\n" rule (String.concat "\n\t" terms))
-          rules;
-        print_endline ""
-  )
-  | Error e -> (
-    print_endline ("Error: " ^ (Types.string_of_exn e));
-  )
+      (* ambiente de tipos *)
+      Printf.printf "%s\n\n" (Types.string_of_env env);
+
+      (* esquemas de regras de inferência substituídos pelos {termos, valores, tipos} *)
+      List.iteri (fun index (r, t) ->
+        let rule' = Repr.substitute (Repr.get_rule r) t in
+        Printf.printf "(%3d) {%15s} %s\n" (index+1) r rule') rules
+      ;
+
+      print_endline ""; 
+
+  | Error exn ->
+      Printf.printf "Error: %s\n\n" (Types.string_of_exn exn)
 ;;
 
 let print_terms (es: Terms.term list) : unit =

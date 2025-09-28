@@ -146,3 +146,11 @@ let rec is_numeric (e : term) : bool =
   | _ -> false
 ;;
 
+(*  name binding, associação de um termo a um nome *)
+type binding = term * string;;
+
+(*  repr. string de uma associação de um termo a um nome *)
+let string_of_binding (b: binding) : string =
+  let (e, x) = b in
+  x ^ " = " ^ string_of_term e
+;;

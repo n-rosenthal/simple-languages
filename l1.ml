@@ -79,9 +79,9 @@ type tipo =
 (* --- string repr. tipos --------------------------------------- *)
 (* repr. string de tipos *)
 let rec string_of_tipo (t: tipo) : string = match t with
-  | Bool -> "bool"
-  | Int -> "int"
-  | OrderedPair (t1, t2) -> string_of_tipo t1 ^ " * " ^ string_of_tipo t2
+  | Bool                  -> "bool"
+  | Int                   -> "int"
+  | OrderedPair (t1, t2)  -> string_of_tipo t1 ^ " * " ^ string_of_tipo t2
   | Arrow (t1, t2) -> "(" ^ string_of_tipo t1 ^ " → " ^ string_of_tipo t2 ^ ")"
   | RecursiveFn t1 -> "(" ^ string_of_tipo t1 ^ " → " ^ string_of_tipo t1 ^ ")"
 

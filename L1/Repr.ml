@@ -12,22 +12,22 @@ type schema = string * string list;;
 *)
 let rule_schemas_types : (string * schema) list = [
   ("T-Int",
-    ("Γ ⊢ n : int", ["n"]));
+    ("Γ ⊢ n1: int", ["n1"; "Γ"]));
 
   ("T-Bool",
-    ("Γ ⊢ b : bool", ["b"]));
+    ("Γ ⊢ b1: bool", ["b1"; "Γ"]));
 
   ("T-OrderedPair",
-    ("Γ ⊢ e1 : t1, Γ ⊢ e2 : t2 => Γ ⊢ (e1, e2) : (t1, t2)",
-    ["e1"; "t1"; "e2"; "t2"]));
+    ("Γ ⊢ e1: t1 ∧ Γ ⊢ e2: t2 ⊨ Γ ⊢ (e1, e2): (t1 * t2)",
+    ["e1"; "t1"; "e2"; "t2"; "(e1, e2)"; "Γ"]));
 
   ("T-Fst",
-    ("Γ ⊢ e : t1 * t2 => Γ ⊢ fst e : t1",
-    ["e"; "t1"; "t2"]));
+    ("Γ ⊢ e: t1 * t2 ⊨ Γ ⊢ fst e: t1",
+    ["e"; "t1"; "t2"; "Γ"]));
 
   ("T-Snd",
-    ("Γ ⊢ e : t1 * t2 => Γ ⊢ snd e : t2",
-    ["e"; "t1"; "t2"]));
+    ("Γ ⊢ e: t1 * t2 ⊨ Γ ⊢ snd e: t2",
+    ["e"; "t1"; "t2"; "Γ"]));
 ];;
 
 (* dada um esquema de regra e uma lista de (repr. string) de termos, retorna a regra correspondente *)
@@ -36,11 +36,11 @@ let substitute ((rule_body, vars) : schema) (terms : string list) : string =
   let rec aux body vs ts =
     match vs, ts with
     | v::vs', t::ts' ->
-        let re = Str.regexp_string (" " ^ v ^ " ") in
-        let body' = Str.global_replace re (" " ^ t ^ " ") body in
+        let re = Str.regexp_string (v) in
+        let body' = Str.global_replace re (t) body in
         aux body' vs' ts'
     | [], [] -> body
-    | _ -> failwith "substitute: mismatch between variables and terms"
+    | _ -> raise (Invalid_argument "substitute")
   in
   aux rule_body vars terms
 ;;
