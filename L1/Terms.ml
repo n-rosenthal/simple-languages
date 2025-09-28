@@ -11,35 +11,42 @@
 
 (*  sintaxe de termos sobre L1 *)
 type term =
+  | None                                    (* () *)
   | Integer of int                          (* n *)
   | Boolean of bool                         (* b *)
   | OrderedPair of term * term              (* (e1, e2) *)
   | Fst of term                             (* fst e *)
   | Snd of term                             (* snd e *)
+  | Conditional of term * term * term       (* if e1 then e2 else e3 *)
 ;;
 
 (*  repr. string de um termo `e` *)
 let rec string_of_term (e: term) : string =
   match e with
+  | None -> "()"
   | Integer n -> string_of_int n
   | Boolean b -> string_of_bool b
   | OrderedPair (e1, e2) -> "(" ^ string_of_term e1 ^ ", " ^ string_of_term e2 ^ ")"
   | Fst e -> "fst " ^ string_of_term e
   | Snd e -> "snd " ^ string_of_term e
+  | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
 ;;
 
 let rec string_of_ast (e: term) : string =
   match e with
+  | None -> "(None)"
   | Integer n -> "(Integer " ^ string_of_int n ^ ")"
   | Boolean b -> "(Boolean " ^ string_of_bool b ^ ")"
   | OrderedPair (e1, e2) -> "(OrderedPair (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ "))"
   | Fst e -> "(Fst " ^ string_of_ast e ^ ")"
   | Snd e -> "(Snd " ^ string_of_ast e ^ ")"
+  | Conditional (e1, e2, e3) -> "(Conditional (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ ", " ^ string_of_ast e3 ^ "))"
 ;;
 
 
 let rec size (e: term) : int =
   match e with
+  | None -> 1
   | Integer _ -> 1
   | Boolean _ -> 1
   | OrderedPair (e1, e2) -> size e1 + size e2
@@ -49,10 +56,12 @@ let rec size (e: term) : int =
   | Snd e -> (match e with
               | OrderedPair (e1, e2) -> size e2
               | _ -> 0)
+  | Conditional (e1, e2, e3) -> size e1 + size e2 + size e3 + 1
 ;;
 
 let rec depth (e: term) : int =
   match e with
+  | None -> 1
   | Integer _ -> 1
   | Boolean _ -> 1
   | OrderedPair (e1, e2) -> max (depth e1) (depth e2) + 1
@@ -62,11 +71,12 @@ let rec depth (e: term) : int =
   | Snd e -> (match e with
               | OrderedPair (e1, e2) -> depth e2
               | _ -> 0)
+  | Conditional (e1, e2, e3) -> max (depth e1) (max (depth e2) (depth e3)) + 1
 ;;
 
 let rec constants (e : term) : string list =
   match e with
-  | Integer _ | Boolean _ -> [string_of_term e]
+  | Integer _ | Boolean _ | None -> [string_of_term e]
   | OrderedPair (e1, e2) -> constants e1 @ constants e2
   | Fst e -> (match e with
               | OrderedPair (e1, e2) -> constants e1
@@ -74,12 +84,14 @@ let rec constants (e : term) : string list =
   | Snd e -> (match e with
               | OrderedPair (e1, e2) -> constants e2
               | _ -> [])
+  | Conditional (e1, e2, e3) -> constants e1 @ constants e2 @ constants e3
 ;;
 
 
 
 (*  sintaxe de valores sobre L1 *)
 type value =
+  | Unit                                    (* (), the value of None or Unit *)
   | VInt of int                             (* n *)
   | VBool of bool                           (* b *)
   | VPair of value * value                  (* (v1, v2) *)
@@ -88,9 +100,10 @@ type value =
 (*  repr. string de um valor `v` *)
 let rec string_of_value (v: value) : string =
   match v with
-  | VInt n -> string_of_int n
-  | VBool b -> string_of_bool b
-  | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
+  | Unit            -> "()"
+  | VInt n          -> string_of_int n
+  | VBool b         -> string_of_bool b
+  | VPair (v1, v2)  -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
 ;;
 
 (*  ValueError ::= erro na avaliação de um termo enquanto valor *)
@@ -107,6 +120,7 @@ let string_of_value_error (e: exn) : string =
 (*  dado um termo `e`, retorna verdadeiro se `e` for um valor em L1 *)
 let rec is_value (e: term) : bool =
   match e with
+  | None -> true
   | Integer _ -> true
   | Boolean _ -> true
   | OrderedPair (e1, e2) -> is_value e1 && is_value e2
@@ -117,6 +131,7 @@ let rec is_value (e: term) : bool =
 let rec value_of_term (e: term) : value option =
   if (not (is_value e)) then None
   else match e with
+    | None -> Some (Unit)
     | Integer n -> Some (VInt n)
     | Boolean b -> Some (VBool b)
     | OrderedPair (e1, e2) -> (

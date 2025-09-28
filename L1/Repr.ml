@@ -11,6 +11,9 @@ type schema = string * string list;;
   ==============================================================
 *)
 let rule_schemas_types : (string * schema) list = [
+  ("T-Unit",
+    ("Γ ⊢ (): unit", []));
+
   ("T-Int",
     ("Γ ⊢ n1: int", ["n1"; "Γ"]));
 
@@ -28,6 +31,11 @@ let rule_schemas_types : (string * schema) list = [
   ("T-Snd",
     ("Γ ⊢ e: t1 * t2 ⊨ Γ ⊢ snd e: t2",
     ["e"; "t1"; "t2"; "Γ"]));
+
+  ("T-If",
+    ("Γ ⊢ e1: bool ∧ Γ ⊢ e2: t ∧ Γ ⊢ e3: t ⊨ Γ ⊢ if e1 then e2 else e3: t",
+    ["e1"; "e2"; "e3"; "t"; "Γ"]));
+
 ];;
 
 (* dada um esquema de regra e uma lista de (repr. string) de termos, retorna a regra correspondente *)

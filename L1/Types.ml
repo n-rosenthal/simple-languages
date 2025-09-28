@@ -4,6 +4,7 @@
 
 (*  tipos de L1 *)
 type tipo =
+  | NoneType
   | Bool
   | Int
   | Pair of tipo * tipo
@@ -11,6 +12,7 @@ type tipo =
 
 (* repr. string de um tipo *)
 let rec string_of_tipo (t: tipo) : string = match t with
+  | NoneType -> "unit"
   | Bool -> "bool"
   | Int -> "int"
   | Pair (t1, t2) -> "(" ^ string_of_tipo t1 ^ " * " ^ string_of_tipo t2 ^ ")"
@@ -47,6 +49,9 @@ let string_of_exn (error: exn) : string = match error with
     retorna um resultado Ok (T, regras) ou Error (exceção) *)
     let rec typeinfer (e: Terms.term) (env: env) : (tipo * env * Repr.schema list, exn) result =
   match e with
+  (* Unit (), None *)
+  | Terms.None -> Ok (NoneType, env, [("T-Unit", [])])
+
   (* Integer n *)
   | Terms.Integer n -> Ok (Int, env, [("T-Int", [Terms.string_of_term e; string_of_env env])])
 
@@ -90,6 +95,23 @@ let string_of_exn (error: exn) : string = match error with
     | Ok (t, env1, rules1) -> Error (TypeError ("argument of `snd e` must be a pair", Some e))
     | Error exn -> Error exn)
 
-
+  (* if e1 then e2 else e3 *)
+  | Terms.Conditional (e1, e2, e3) -> (match typeinfer e1 env with
+    | Ok (Bool, env', rules') -> (match typeinfer e2 env' with
+      | Ok (t2, env'', rules2) -> (match typeinfer e3 env'' with
+        | Ok (t3, env''', rules3) -> (match t2, t3 with
+          | t2, t3 when t2 = t3 -> Ok (t2, env''', rules2 @ rules3 @ [("T-If", [
+            Terms.string_of_term e1;
+            Terms.string_of_term e2;
+            Terms.string_of_term e3;
+            string_of_tipo t2;
+            string_of_env env
+          ])])
+          | t2, t3 -> Error (TypeError ("branches of `if e1 then e2 else e3` must have same type", Some e))
+        )
+        | Error exn -> Error exn)
+      | Error exn -> Error exn)
+    | Ok (t, env', rules') -> Error (TypeError ("condition of `if e1 then e2 else e3` must be a boolean", Some e))
+    | Error exn -> Error exn)
   | _ -> Error (TypeError ("typeinfer failed", Some e))
 ;;
