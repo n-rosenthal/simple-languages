@@ -40,7 +40,11 @@ let rule_schemas_types : (string * schema) list = [
     ("Γ('x') = t ⊨ x: t", ["x"; "t"; "Γ"]));
 
   ("T-Let",
-    ("Γ ⊢ e1: t1, Γ[x |→ t1] ⊢ e2: t2 ⊨ Γ ⊢ let x = e1 in e2: t2",
+    ("Γ ⊢ e1: t1, [(e1, x, t1) :: Γ] ⊢ e2: t2 ⊨ Γ ⊢ let x = e1 in e2: t2",
+    ["e1"; "t1"; "x"; "e2"; "t2"; "Γ"]));
+
+  ("T-Fun",
+    ("Γ ⊢ e1: t1, Γ[x ⇒ t1] ⊢ e2: t2 ⊨ Γ ⊢ fun x = e1 [in e2]: t2",
     ["e1"; "t1"; "x"; "e2"; "t2"; "Γ"]));
 
 ];;

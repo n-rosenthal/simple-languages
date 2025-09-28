@@ -31,17 +31,19 @@ let rec lookup (x: string) (envtypes: env) : (Terms.term * tipo)  option = (
 )
 
 
-(*  repr. string de um ambiente de tipos Γ *)
-let string_of_env (env: env) : string =
-  if env = [] then "[]"
-  else
-    let bindings = List.map (fun (b, t) -> Terms.string_of_binding b ^ " : " ^ string_of_tipo t) env in
-    String.concat ", " bindings
-;;
-
-
-
-
+(*  repr. string de um ambiente de tipos Γ 
+  "[(x, e, t) :: (y, e, t) :: Γ]" etc
+*)
+let string_of_env (env: env) : string = (
+  let rec aux (env: env) : string = (
+    match env with
+    | [] -> "Γ"
+    | ((e, y), t)::tl -> "(" ^ y ^ ", " ^ Terms.string_of_term e ^ ", " ^ string_of_tipo t ^ ") :: " ^ aux tl
+  )
+  in (
+    "[" ^ aux env ^ "]"
+  )
+);;
 
 (*  TypeError ::= termo mal-formado ou de tipo indefinido *)
 exception TypeError of string * Terms.term option;;
@@ -106,10 +108,10 @@ let string_of_exn (error: exn) : string = match error with
 
   (* if e1 then e2 else e3 *)
   | Terms.Conditional (e1, e2, e3) -> (match typeinfer e1 env with
-    | Ok (Bool, env', rules') -> (match typeinfer e2 env' with
+    | Ok (Bool, env', rules1) -> (match typeinfer e2 env' with
       | Ok (t2, env'', rules2) -> (match typeinfer e3 env'' with
         | Ok (t3, env''', rules3) -> (match t2, t3 with
-          | t2, t3 when t2 = t3 -> Ok (t2, env''', rules2 @ rules3 @ [("T-If", [
+          | t2, t3 when t2 = t3 -> Ok (t2, env''', rules1 @ rules2 @ rules3 @ [("T-If", [
             Terms.string_of_term e1;
             Terms.string_of_term e2;
             Terms.string_of_term e3;
@@ -132,20 +134,34 @@ let string_of_exn (error: exn) : string = match error with
     | None -> Error (TypeError ("Unbound identifier `" ^ x ^ "`", Some e)))
 
   (* let x = e1 in e2 *)
-  | Terms.VarDefinition (nb, e2) -> (match typeinfer e2 env with
-    | Ok (t2, env2, rules2) -> (match typeinfer (fst nb) env2 with
-      | Ok (t1, env3, rules3) -> Ok (t2, env3, rules2 @ rules3 @ [("T-Let", [
-        Terms.string_of_term (fst nb);
-        string_of_tipo t1;
-        (snd nb);
-        Terms.string_of_term e2;
-        string_of_tipo t2;
-        string_of_env env
-      ])])
+  | Terms.VarDefinition (nb, e2) -> 
+    (*  verifica se o binding `nb` está no ambiente atual; se sim, verifica igualdade e atualiza se necessário; senão, adiciona *)
+    (match lookup (snd nb) env with
+    | Some (e1, t1) -> (match typeinfer e1 env with
+      | Ok (t2, env1, rules1) -> (match t1, t2 with
+        | t1, t2 when t1 = t2 -> Ok (t1, env1, rules1 @ [("T-Let", [
+          Terms.string_of_term e1;
+          string_of_tipo t1;
+          snd nb;
+          Terms.string_of_term e2;
+          string_of_tipo t2;
+          string_of_env env
+        ])])
+        | t1, t2 -> Error (TypeError ("bindings of `let x = e1 in e2` must have same type", Some e))
+      )
       | Error exn -> Error exn)
-    | Error exn -> Error exn)
-
-
+    | None -> (match typeinfer (fst nb) env with
+      | Ok (t1, env1, rules1) -> (match typeinfer e2 ((nb, t1) :: env1) with
+        | Ok (t2, env', rules2) -> Ok (t2, env', rules1 @ rules2 @ [("T-Let", [
+          Terms.string_of_term (fst nb);
+          string_of_tipo t1;
+          snd nb;
+          Terms.string_of_term e2;
+          string_of_tipo t2;
+          string_of_env env
+        ])])
+        | Error exn -> Error exn)
+      | Error exn -> Error exn))
 
   | _ -> Error (TypeError ("typeinfer failed", Some e))
 ;;

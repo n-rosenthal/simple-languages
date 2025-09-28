@@ -38,7 +38,7 @@ let rec string_of_term (e: term) : string =
   | VarDefinition (b, e) -> "let " ^ string_of_binding b ^ " in " ^ string_of_term e
     and string_of_binding (b: binding) : string =
       let (e, x) = b in
-      x ^ " = " ^ string_of_term e
+      "'" ^ x ^ "' = " ^ string_of_term e
 ;;
 
 

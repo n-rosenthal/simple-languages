@@ -2,6 +2,7 @@
 
 let print_term (e: Terms.term) : unit =
   (* Expression and AST *)
+  print_endline "--- detalhes da expressão ---";
   Printf.printf "expr: %s\nAST: %s\n\n"
     (Terms.string_of_term e)
     (Terms.string_of_ast e);
@@ -10,18 +11,18 @@ let print_term (e: Terms.term) : unit =
   let size  = Terms.size e in
   let depth = Terms.depth e in
   let consts = Terms.constants e |> String.concat ", " in
-  Printf.printf "\tsize: %d\n\tdepth: %d\n\tconstants: [%s]\n\n"
+  Printf.printf "size: %d\ndepth: %d\nconstants: [%s]\n\n"
     size depth consts;
 
   (* Type inference *)
   match Types.typeinfer e [] with
   | Ok (t, env, rules) ->
-      Printf.printf "(%s : %s)\n\n"
+      Printf.printf "tipo:\n (%s) : %s\n\n"
         (Terms.string_of_term e)
         (Types.string_of_tipo t);
 
       (* ambiente de tipos *)
-      Printf.printf "%s\n\n" (Types.string_of_env env);
+      Printf.printf "ambiente de tipos: %s\n\n" (Types.string_of_env env);
 
       (* esquemas de regras de inferência substituídos pelos {termos, valores, tipos} *)
       List.iteri (fun index (r, t) ->
