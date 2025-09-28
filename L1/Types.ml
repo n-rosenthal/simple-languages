@@ -22,6 +22,15 @@ let rec string_of_tipo (t: tipo) : string = match t with
 (*  ambiente de tipos: associa a cada NameBinding um tipo *)
 type env = (Terms.binding * tipo) list;;
 
+
+(*  busca por um identificador `x` no ambiente de tipos Γ e retorna o seu tipo `t`, se existir *)
+let rec lookup (x: string) (envtypes: env) : (Terms.term * tipo)  option = (
+  match envtypes with
+  | [] -> None
+  | ((e, y),  t)::tl -> if x = y then Some (e, t) else lookup x tl
+)
+
+
 (*  repr. string de um ambiente de tipos Γ *)
 let string_of_env (env: env) : string =
   if env = [] then "[]"
@@ -113,5 +122,30 @@ let string_of_exn (error: exn) : string = match error with
       | Error exn -> Error exn)
     | Ok (t, env', rules') -> Error (TypeError ("condition of `if e1 then e2 else e3` must be a boolean", Some e))
     | Error exn -> Error exn)
+
+  | Terms.Identifier x -> (match lookup x env with
+    | Some (e', t) -> Ok (t, env, [("T-Var", [
+                                              x;
+                                              string_of_tipo t;
+                                              string_of_env env
+                                            ])])
+    | None -> Error (TypeError ("Unbound identifier `" ^ x ^ "`", Some e)))
+
+  (* let x = e1 in e2 *)
+  | Terms.VarDefinition (nb, e2) -> (match typeinfer e2 env with
+    | Ok (t2, env2, rules2) -> (match typeinfer (fst nb) env2 with
+      | Ok (t1, env3, rules3) -> Ok (t2, env3, rules2 @ rules3 @ [("T-Let", [
+        Terms.string_of_term (fst nb);
+        string_of_tipo t1;
+        (snd nb);
+        Terms.string_of_term e2;
+        string_of_tipo t2;
+        string_of_env env
+      ])])
+      | Error exn -> Error exn)
+    | Error exn -> Error exn)
+
+
+
   | _ -> Error (TypeError ("typeinfer failed", Some e))
 ;;

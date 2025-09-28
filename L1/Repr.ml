@@ -36,6 +36,13 @@ let rule_schemas_types : (string * schema) list = [
     ("Γ ⊢ e1: bool ∧ Γ ⊢ e2: t ∧ Γ ⊢ e3: t ⊨ Γ ⊢ if e1 then e2 else e3: t",
     ["e1"; "e2"; "e3"; "t"; "Γ"]));
 
+  ("T-Var",
+    ("Γ('x') = t ⊨ x: t", ["x"; "t"; "Γ"]));
+
+  ("T-Let",
+    ("Γ ⊢ e1: t1, Γ[x |→ t1] ⊢ e2: t2 ⊨ Γ ⊢ let x = e1 in e2: t2",
+    ["e1"; "t1"; "x"; "e2"; "t2"; "Γ"]));
+
 ];;
 
 (* dada um esquema de regra e uma lista de (repr. string) de termos, retorna a regra correspondente *)

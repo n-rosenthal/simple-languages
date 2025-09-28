@@ -18,7 +18,11 @@ type term =
   | Fst of term                             (* fst e *)
   | Snd of term                             (* snd e *)
   | Conditional of term * term * term       (* if e1 then e2 else e3 *)
-;;
+  | Identifier of string                    (* x, identificador, var *)
+  | VarDefinition of binding * term         (* let x = e1 in e2 *)
+and binding = term * string;;               (*  name binding, associação de um termo a um nome *)
+
+
 
 (*  repr. string de um termo `e` *)
 let rec string_of_term (e: term) : string =
@@ -30,7 +34,13 @@ let rec string_of_term (e: term) : string =
   | Fst e -> "fst " ^ string_of_term e
   | Snd e -> "snd " ^ string_of_term e
   | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
+  | Identifier x -> x
+  | VarDefinition (b, e) -> "let " ^ string_of_binding b ^ " in " ^ string_of_term e
+    and string_of_binding (b: binding) : string =
+      let (e, x) = b in
+      x ^ " = " ^ string_of_term e
 ;;
+
 
 let rec string_of_ast (e: term) : string =
   match e with
@@ -41,7 +51,8 @@ let rec string_of_ast (e: term) : string =
   | Fst e -> "(Fst " ^ string_of_ast e ^ ")"
   | Snd e -> "(Snd " ^ string_of_ast e ^ ")"
   | Conditional (e1, e2, e3) -> "(Conditional (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ ", " ^ string_of_ast e3 ^ "))"
-;;
+  | Identifier x -> "(Identifier " ^ x ^ ")"
+  | VarDefinition (b, e) -> "(VarDefinition (" ^ string_of_binding b ^ ", " ^ string_of_ast e ^ "))"
 
 
 let rec size (e: term) : int =
@@ -57,6 +68,8 @@ let rec size (e: term) : int =
               | OrderedPair (e1, e2) -> size e2
               | _ -> 0)
   | Conditional (e1, e2, e3) -> size e1 + size e2 + size e3 + 1
+  | Identifier _ -> 1
+  | VarDefinition (b, e) -> (size (fst b) + size e)
 ;;
 
 let rec depth (e: term) : int =
@@ -72,6 +85,8 @@ let rec depth (e: term) : int =
               | OrderedPair (e1, e2) -> depth e2
               | _ -> 0)
   | Conditional (e1, e2, e3) -> max (depth e1) (max (depth e2) (depth e3)) + 1
+  | Identifier _ -> 1
+  | VarDefinition (b, e) -> max (depth (fst b)) (depth e)
 ;;
 
 let rec constants (e : term) : string list =
@@ -85,6 +100,8 @@ let rec constants (e : term) : string list =
               | OrderedPair (e1, e2) -> constants e2
               | _ -> [])
   | Conditional (e1, e2, e3) -> constants e1 @ constants e2 @ constants e3
+  | Identifier _ -> []
+  | VarDefinition (b, e) -> constants (fst b) @ constants e
 ;;
 
 
@@ -151,6 +168,22 @@ let rec value_of_term (e: term) : value option =
                 | OrderedPair (e1, e2) -> value_of_term e2
                 | _ -> None)
 
+    | Conditional (e1, e2, e3) -> (
+      match value_of_term e1 with
+      | Some (VBool b) -> if b then value_of_term e2 else value_of_term e3
+      | Some _ -> None
+      | None -> None
+    )
+
+    | Identifier _ -> None
+
+    (* let x = e1 in e2, onde `nb = (x, e1)`*)
+    | VarDefinition (nb, e) -> (
+      match value_of_term (fst nb) with
+      | Some _ -> value_of_term e
+      | None -> None
+    )
+
     | _ -> raise (ValueError ("value_of_term: not a value", Some e))
 ;;
 
@@ -161,11 +194,3 @@ let rec is_numeric (e : term) : bool =
   | _ -> false
 ;;
 
-(*  name binding, associação de um termo a um nome *)
-type binding = term * string;;
-
-(*  repr. string de uma associação de um termo a um nome *)
-let string_of_binding (b: binding) : string =
-  let (e, x) = b in
-  x ^ " = " ^ string_of_term e
-;;
