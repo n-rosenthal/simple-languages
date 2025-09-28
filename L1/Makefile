@@ -1,7 +1,7 @@
 OCAMLC=ocamlc
 OCAMLFLAGS=-g
 LIBS=str.cma
-SOURCES=Repr.ml Terms.ml Types.ml Results.ml main.ml
+SOURCES=Repr.ml Terms.ml Types.ml Eval.ml Results.ml main.ml
 OBJECTS=$(SOURCES:.ml=.cmo)
 EXEC=l1
 

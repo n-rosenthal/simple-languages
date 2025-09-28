@@ -15,7 +15,7 @@ let print_term (e: Terms.term) : unit =
     size depth consts;
 
   (* Type inference *)
-  match Types.typeinfer e [] with
+  (match Types.typeinfer e [] with
   | Ok (t, env, rules) ->
       Printf.printf "tipo:\n (%s) : %s\n\n"
         (Terms.string_of_term e)
@@ -33,7 +33,14 @@ let print_term (e: Terms.term) : unit =
       print_endline ""; 
 
   | Error exn ->
-      Printf.printf "Error: %s\n\n" (Types.string_of_exn exn)
+      Printf.printf "Error: %s\n\n" (Types.string_of_exn exn));
+
+  (* Evaluation *)
+  let v, env = Eval.eval e [] [] in
+  Printf.printf "avaliação: %s\n\n" (Terms.string_of_value v);
+
+  (* ambiente de valores *)
+  Printf.printf "ambiente de valores: %s\n\n" (Eval.string_of_env env)
 ;;
 
 let print_terms (es: Terms.term list) : unit =
