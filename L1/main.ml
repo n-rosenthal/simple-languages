@@ -1,33 +1,31 @@
-let terms : Terms.term list = [
-  (*  Integer (-1) *)
-  (Terms.Integer (-1));
+open Terms
+open Types
 
-  (*  Integer 0 *)
-  (Terms.Integer 0);
+let _ =
+  Results.print_terms ([
+    Fst(
+      OrderedPair(
+        OrderedPair(
+          Boolean true,
+          Boolean false
+        ),
+        OrderedPair(
+          Boolean false,
+          Boolean true
+        )
+      )
+    );
 
-  (*  Integer 1 *)
-  (Terms.Integer 1);
-
-  (*  Boolean true *)
-  (Terms.Boolean true);
-
-  (*  Boolean false *)
-  (Terms.Boolean false);
-
-  (*  OrderedPair (Integer 0, Integer 1) *)
-  (Terms.OrderedPair (Terms.Integer 0, Terms.Integer 1));
-
-  (*  OrderedPair (Integer (-1), Boolean true) *)
-  (Terms.OrderedPair (Terms.Integer (-1), Terms.Boolean true));
-
-  (* fst (true, false) *)
-  (Terms.Fst (Terms.OrderedPair (Terms.Boolean true, Terms.Boolean false)));
-
-  (* snd (false (0, true))*)
-  (Terms.Snd (Terms.OrderedPair (Terms.Boolean false, Terms.OrderedPair (Terms.Integer 0, Terms.Boolean true))));
-]
-
-in
-
-Results.print_terms terms
-;;
+    Snd(
+      OrderedPair(
+        OrderedPair(
+          Integer 1,
+          Integer 2
+        ),
+        OrderedPair(
+          Integer 3,
+          Integer 4
+        )
+      )
+    )
+  ])
