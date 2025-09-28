@@ -14,6 +14,8 @@ type term =
   | Integer of int                          (* n *)
   | Boolean of bool                         (* b *)
   | OrderedPair of term * term              (* (e1, e2) *)
+  | Fst of term                             (* fst e *)
+  | Snd of term                             (* snd e *)
 ;;
 
 (*  repr. string de um termo `e` *)
@@ -22,6 +24,17 @@ let rec string_of_term (e: term) : string =
   | Integer n -> string_of_int n
   | Boolean b -> string_of_bool b
   | OrderedPair (e1, e2) -> "(" ^ string_of_term e1 ^ ", " ^ string_of_term e2 ^ ")"
+  | Fst e -> "fst " ^ string_of_term e
+  | Snd e -> "snd " ^ string_of_term e
+;;
+
+let rec string_of_ast (e: term) : string =
+  match e with
+  | Integer n -> "(Integer " ^ string_of_int n ^ ")"
+  | Boolean b -> "(Boolean " ^ string_of_bool b ^ ")"
+  | OrderedPair (e1, e2) -> "(OrderedPair (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ "))"
+  | Fst e -> "(Fst " ^ string_of_ast e ^ ")"
+  | Snd e -> "(Snd " ^ string_of_ast e ^ ")"
 ;;
 
 
@@ -30,6 +43,12 @@ let rec size (e: term) : int =
   | Integer _ -> 1
   | Boolean _ -> 1
   | OrderedPair (e1, e2) -> size e1 + size e2
+  | Fst e -> (match e with
+              | OrderedPair (e1, e2) -> size e1
+              | _ -> 0)
+  | Snd e -> (match e with
+              | OrderedPair (e1, e2) -> size e2
+              | _ -> 0)
 ;;
 
 let rec depth (e: term) : int =
@@ -37,12 +56,24 @@ let rec depth (e: term) : int =
   | Integer _ -> 1
   | Boolean _ -> 1
   | OrderedPair (e1, e2) -> max (depth e1) (depth e2) + 1
+  | Fst e -> (match e with
+              | OrderedPair (e1, e2) -> depth e1
+              | _ -> 0)
+  | Snd e -> (match e with
+              | OrderedPair (e1, e2) -> depth e2
+              | _ -> 0)
 ;;
 
 let rec constants (e : term) : string list =
   match e with
   | Integer _ | Boolean _ -> [string_of_term e]
   | OrderedPair (e1, e2) -> constants e1 @ constants e2
+  | Fst e -> (match e with
+              | OrderedPair (e1, e2) -> constants e1
+              | _ -> [])
+  | Snd e -> (match e with
+              | OrderedPair (e1, e2) -> constants e2
+              | _ -> [])
 ;;
 
 
@@ -79,6 +110,7 @@ let rec is_value (e: term) : bool =
   | Integer _ -> true
   | Boolean _ -> true
   | OrderedPair (e1, e2) -> is_value e1 && is_value e2
+  | _ -> false
 ;;
 
 (*  dado um termo `e`, se `e` for um valor, então retorna seu valor correspondente em L1 *)
@@ -96,6 +128,13 @@ let rec value_of_term (e: term) : value option =
           ValueError ("value_of_term [OrderedPair]: first argument is not a value" ^ string_of_term e1, Some e1))
       | (None, None)       -> None
       )
+
+    | Fst e -> (match e with
+                | OrderedPair (e1, e2) -> value_of_term e1
+                | _ -> None)
+    | Snd e -> (match e with
+                | OrderedPair (e1, e2) -> value_of_term e2
+                | _ -> None)
 
     | _ -> raise (ValueError ("value_of_term: not a value", Some e))
 ;;

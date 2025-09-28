@@ -20,6 +20,14 @@ let rule_schemas_types : (string * schema) list = [
   ("T-OrderedPair",
     ("Γ ⊢ e1 : t1, Γ ⊢ e2 : t2 => Γ ⊢ (e1, e2) : (t1, t2)",
     ["e1"; "t1"; "e2"; "t2"]));
+
+  ("T-Fst",
+    ("Γ ⊢ e : t1 * t2 => Γ ⊢ fst e : t1",
+    ["e"; "t1"; "t2"]));
+
+  ("T-Snd",
+    ("Γ ⊢ e : t1 * t2 => Γ ⊢ snd e : t2",
+    ["e"; "t1"; "t2"]));
 ];;
 
 (* dada um esquema de regra e uma lista de (repr. string) de termos, retorna a regra correspondente *)
