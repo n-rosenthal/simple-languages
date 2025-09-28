@@ -3,6 +3,7 @@ open Types
 
 let _ =
   Results.print_terms ([
+    (* fst ( (true, false), (false, true) ) *)
     Fst(
       OrderedPair(
         OrderedPair(
@@ -16,6 +17,7 @@ let _ =
       )
     );
 
+    (* snd ( (1, 2), (3, 4) ) *)
     Snd(
       OrderedPair(
         OrderedPair(
