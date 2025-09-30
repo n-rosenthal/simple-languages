@@ -20,18 +20,15 @@ type term =
   | Conditional of term * term * term       (* if e1 then e2 else e3 *)
   | Identifier of string                    (* x, identificador, var *)
   | VarDefinition of binding * term         (* let x = e1 in e2 *)
+  | Function of binding * term              (* fun x -> e1 in e2 *)
+  | Application of term * term              (* e1 e2 *)
 
   (* extension: exception and error handling *)
   | TryWith of term * term                  (* try e1 with e2 *)
   | Raise of term                           (* raise e1 *)
-
-
-
+  | TypeError of string                     (* type error *)
 and binding = term * string;;               (*  name binding, associação de um termo a um nome *)
 
-
-
-(*  repr. string de um termo `e` *)
 let rec string_of_term (e: term) : string =
   match e with
   | None -> "()"
@@ -43,27 +40,42 @@ let rec string_of_term (e: term) : string =
   | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
   | Identifier x -> x
   | VarDefinition (b, e) -> "let " ^ string_of_binding b ^ " in " ^ string_of_term e
+  | Function (b, e2) -> "fun " ^ string_of_binding b ^ " in " ^ string_of_term e2
+  | Application (e1, e2) -> string_of_term e1 ^ " @ " ^ string_of_term e2
+
   | TryWith (e1, e2) -> "try " ^ string_of_term e1 ^ " with " ^ string_of_term e2
   | Raise e -> "raise " ^ string_of_term e
+  | TypeError s -> "type error: " ^ s
+  | _ -> raise (Invalid_argument "string_of_term");
     and string_of_binding (b: binding) : string =
       let (e, x) = b in
       "'" ^ x ^ "' = " ^ string_of_term e
 ;;
 
-
-let rec string_of_ast (e: term) : string =
+let rec ast_of_term (e: term) : string =
   match e with
   | None -> "(None)"
   | Integer n -> "(Integer " ^ string_of_int n ^ ")"
   | Boolean b -> "(Boolean " ^ string_of_bool b ^ ")"
-  | OrderedPair (e1, e2) -> "(OrderedPair (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ "))"
-  | Fst e -> "(Fst " ^ string_of_ast e ^ ")"
-  | Snd e -> "(Snd " ^ string_of_ast e ^ ")"
-  | Conditional (e1, e2, e3) -> "(Conditional (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ ", " ^ string_of_ast e3 ^ "))"
-  | Identifier x -> "(Identifier " ^ x ^ ")"
-  | VarDefinition (b, e) -> "(VarDefinition (" ^ string_of_binding b ^ ", " ^ string_of_ast e ^ "))"
-  | TryWith (e1, e2) -> "(TryWith (" ^ string_of_ast e1 ^ ", " ^ string_of_ast e2 ^ "))"
-  | Raise e -> "(Raise " ^ string_of_ast e ^ ")"
+  | OrderedPair (e1, e2) -> "(OrderedPair (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
+  | Fst e -> "(Fst (" ^ ast_of_term e ^ "))"
+  | Snd e -> "(Snd (" ^ ast_of_term e ^ "))"
+  | Conditional (e1, e2, e3) -> "(Conditional (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ ", " ^ ast_of_term e3 ^ "))"
+  | Identifier x -> "(Identifier \"" ^ x ^ "\")"
+  | VarDefinition (b, e) -> "(VarDefinition (" ^ ast_of_binding b ^ ", " ^ ast_of_term e ^ "))"
+  | Function (b, e2) -> "(Function (" ^ ast_of_binding b ^ ", " ^ ast_of_term e2 ^ "))"
+  | Application (e1, e2) -> "(Application (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
+
+  | TryWith (e1, e2) -> "(TryWith (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
+  | Raise e -> "(Raise (" ^ ast_of_term e ^ "))"
+  | TypeError s -> "(TypeError \"" ^ s ^ "\")"
+  | _ -> raise (Invalid_argument "string_of_term");
+    and ast_of_binding (b: binding) : string =
+      let (e, x) = b in
+      "(" ^ ast_of_term e ^ ", \"" ^ x ^ "\")"
+;;
+
+
 
 let rec size (e: term) : int =
   match e with
@@ -80,8 +92,12 @@ let rec size (e: term) : int =
   | Conditional (e1, e2, e3) -> size e1 + size e2 + size e3 + 1
   | Identifier _ -> 1
   | VarDefinition (b, e) -> (size (fst b) + size e)
+  | Function (b, e2) -> (size (fst b) + size e2 + 1)
+  | Application (e1, e2) -> size e1 + size e2
+
   | TryWith (e1, e2) -> size e1 + size e2 + 1
   | Raise e -> size e + 1
+  | TypeError _ -> 1
 ;;
 
 let rec depth (e: term) : int =
@@ -99,26 +115,35 @@ let rec depth (e: term) : int =
   | Conditional (e1, e2, e3) -> max (depth e1) (max (depth e2) (depth e3)) + 1
   | Identifier _ -> 1
   | VarDefinition (b, e) -> max (depth (fst b)) (depth e)
+  | Function (b, e2) -> max (depth (fst b)) (depth e2) + 1
+  | Application (e1, e2) -> max (depth e1) (depth e2)
+
   | TryWith (e1, e2) -> max (depth e1) (depth e2) + 1
   | Raise e -> depth e + 1
+  | TypeError _ -> 1
 ;;
 
-let rec constants (e : term) : string list =
+(* constantes presentes em `e` *)
+let rec constants (e: term) : string list =
   match e with
-  | Integer _ | Boolean _ | None -> [string_of_term e]
+  | None -> []
+  | Integer _ -> []
+  | Boolean _ -> []
   | OrderedPair (e1, e2) -> constants e1 @ constants e2
-  | Fst e -> (match e with
-              | OrderedPair (e1, e2) -> constants e1
-              | _ -> [])
-  | Snd e -> (match e with
-              | OrderedPair (e1, e2) -> constants e2
-              | _ -> [])
+  | Fst e -> constants e
+  | Snd e -> constants e
   | Conditional (e1, e2, e3) -> constants e1 @ constants e2 @ constants e3
-  | Identifier _ -> []
+  | Identifier x -> [x]
   | VarDefinition (b, e) -> constants (fst b) @ constants e
+  | Function (b, e2) -> constants (fst b) @ constants e2
+  | Application (e1, e2) -> constants e1 @ constants e2
+
   | TryWith (e1, e2) -> constants e1 @ constants e2
   | Raise e -> constants e
+  | TypeError _ -> []
 ;;
+
+
 
 
 
@@ -128,17 +153,19 @@ type value =
   | VInt of int                             (* n *)
   | VBool of bool                           (* b *)
   | VPair of value * value                  (* (v1, v2) *)
+  | Closure of binding * term               (* fun x -> e1 in e2 *)
+
   | Error of string                         (* error is the value of a term Exception x *)
 ;;
 
-(*  repr. string de um valor `v` *)
 let rec string_of_value (v: value) : string =
   match v with
-  | Unit            -> "()"
-  | VInt n          -> string_of_int n
-  | VBool b         -> string_of_bool b
-  | VPair (v1, v2)  -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
-  | Error s         -> "error " ^ s
+  | Unit -> "()"
+  | VInt n -> string_of_int n
+  | VBool b -> string_of_bool b
+  | VPair (v1, v2) -> "(" ^ string_of_value v1 ^ ", " ^ string_of_value v2 ^ ")"
+  | Closure (b, e) -> "fun " ^ string_of_binding b ^ " -> " ^ string_of_term e
+  | Error s -> "error: " ^ s
 ;;
 
 (*  ValueError ::= erro na avaliação de um termo enquanto valor *)

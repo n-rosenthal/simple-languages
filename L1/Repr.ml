@@ -12,17 +12,17 @@ type schema = string * string list;;
 *)
 let rule_schemas_types : (string * schema) list = [
   ("T-Unit",
-    ("Γ ⊢ (): unit", []));
+    ("Γ ⊢ (): unit",  []));
 
   ("T-Int",
-    ("Γ ⊢ n1: int", ["n1"; "Γ"]));
+    ("Γ ⊢ n1: int",   ["n1"; "Γ"]));
 
   ("T-Bool",
-    ("Γ ⊢ b1: bool", ["b1"; "Γ"]));
+    ("Γ ⊢ b1: bool",  ["b1"; "Γ"]));
 
   ("T-OrderedPair",
     ("Γ ⊢ e1: t1 ∧ Γ ⊢ e2: t2 ⊨ Γ ⊢ (e1, e2): (t1 * t2)",
-    ["e1"; "t1"; "e2"; "t2"; "(e1, e2)"; "Γ"]));
+    ["e1"; "t1"; "e2"; "t2"; "Γ"]));
 
   ("T-Fst",
     ("Γ ⊢ e: t1 * t2 ⊨ Γ ⊢ fst e: t1",
@@ -49,6 +49,11 @@ let rule_schemas_types : (string * schema) list = [
 
 ];;
 
+let rule_schema_eval : (string * schema) list = [
+
+];;
+
+
 (* dada um esquema de regra e uma lista de (repr. string) de termos, retorna a regra correspondente *)
 (* substitute placeholders ["e1"; "t1"; ...] in rule_body with given terms *)
 let substitute ((rule_body, vars) : schema) (terms : string list) : string =
@@ -59,7 +64,7 @@ let substitute ((rule_body, vars) : schema) (terms : string list) : string =
         let body' = Str.global_replace re (t) body in
         aux body' vs' ts'
     | [], [] -> body
-    | _ -> raise (Invalid_argument "substitute")
+    | _ -> raise (Invalid_argument ("couldn't find " ^ (String.concat ", " vs) ^ " in " ^ (String.concat ", " ts)))
   in
   aux rule_body vars terms
 ;;
