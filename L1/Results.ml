@@ -200,3 +200,10 @@ let rec printlist_of_ast ?(indent=0) (t:Terms.term) : string list =
 let print_terms (es: Terms.term list) : unit =
   List.iter (print_term 129) es
 ;;
+
+
+(* returns true if the type of `e` after inference is equal to `t` *)
+let assert_type (e: Terms.term) (t: Types.tipo) : bool =
+  let t', _, _ = Typeinfer.typeinfer e [] in
+  t' = t
+;;

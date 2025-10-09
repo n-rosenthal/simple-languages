@@ -1,0 +1,29 @@
+--- detalhes da expressão ---
+expr: let 'x' = 1 in let 'y' = 2 in if fst (true, false) then x else y
+AST: (VarDefinition ('x' = 1, (VarDefinition ('y' = 2, (Conditional ((Fst (OrderedPair ((Boolean true), (Boolean false)))), (Identifier x), (Identifier y)))))))
+
+size: 6
+depth: 2
+constants: [1, 2, true]
+
+tipo:
+ (let 'x' = 1 in let 'y' = 2 in if fst (true, false) then x else y) : int
+
+ambiente de tipos: [(y, 2, int) :: (x, 1, int) :: Γ]
+
+(  1) {          T-Int} [Γ] ⊢ 1: int
+(  2) {          T-Int} [(x, 1, int) :: Γ] ⊢ 2: int
+(  3) {         T-Bool} [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ true: bool
+(  4) {         T-Bool} [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ false: bool
+(  5) {  T-OrderedPair} [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ true: bool ∧ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ false: bool ⊨ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ (true, false): (bool * bool)
+(  6) {          T-Fst} [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ (true, false): bool * bool ⊨ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ fst (true, false): bool
+(  7) {          T-Var} [(y, 2, int) :: (x, 1, int) :: Γ]('x') = int ⊨ x: int
+(  8) {          T-Var} [(y, 2, int) :: (x, 1, int) :: Γ]('y') = int ⊨ y: int
+(  9) {           T-If} [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ fsint (intrue, false): bool ∧ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ x: int ∧ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ y: int ⊨ [(y, 2, int) :: (x, 1, int) :: Γ] ⊢ if fsint (intrue, false) inthen x else y: int
+( 10) {          T-Let} [(x, 1, int) :: Γ] ⊢ 2: int, [(2, y, int) :: [(x, 1, int) :: Γ]] ⊢ if fst (true, false) then x else y: int ⊨ [(x, 1, int) :: Γ] ⊢ let y = 2 in if fst (true, false) then x else y: int
+( 11) {          T-Let} [Γ] ⊢ 1: int, [(1, x, int) :: [Γ]] ⊢ let 'y' = 2 in if fst (true, false) then x else y: int ⊨ [Γ] ⊢ let x = 1 in let 'y' = 2 in if fst (true, false) then x else y: int
+
+avaliação: 2
+
+ambiente de valores: (2, 2, y) (1, 1, x) Δ
+

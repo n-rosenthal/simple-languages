@@ -74,11 +74,54 @@ let rec typeinfer (e: Terms.term) (env: env) : (Types.tipo * env * (string * str
       | _ -> (Types.ExceptionType TypeError, env', rules @ [("TypeError (err 10)", "argumento de `if e1 then e2 else e3` deve ser um booleano, mas foi " ^ Terms.ast_of_term e1)])
       )
     )
-
-
-  | Raise e -> (match typeinfer e env with
-    | _ -> (Types.ExceptionType (Types.NotImplemented " wildcard"), env, [("RaiseWildExn", string_of_env env ^ " ⊢ " ^ Terms.ast_of_term e ^ ": exn")]))
   
+  (* Identifier x *)
+  | Terms.Identifier x -> (match lookup x env with
+    | Some (e, t) -> (t, env, [("T-Var", string_of_env env ^ " ⊢ " ^ Terms.ast_of_term e ^ ": " ^ Types.string_of_tipo t)])
+    | None -> (ExceptionType TypeError, env, [("UnboundVariable", "identificador " ^ x ^ " não encontrado")])
+  )
 
-  | _ -> failwith "typeinfer"
+  (* Variable definition, let x = e1 in e2, onde nbinding = (e1, x) *)
+  (* dado que de `e1` : `t` em `env`, e dado que `e2` : `t2` em [x, t] :: `env`, então `let x = e1 in e2` : `t2` em `env'` *)
+  | Terms.VarDefinition (x, e1, e2) -> (
+    let t, env', rules = typeinfer e1 env in (
+      let env'' = ((e1, x), t) :: env' in (
+        let t2, env''', rules' = typeinfer e2 env'' in (
+          if t2 = t then
+            (t2, env''', rules @ rules' @ [("T-Let", string_of_env env ^ " ⊢ " ^ Terms.ast_of_term e ^ ": " ^ Types.string_of_tipo t2)])
+          else
+            (Types.ExceptionType TypeError, env'', rules' @ [("TypeError (err 11)", "tipos de `e1` e `e2` devem ser iguais, mas sao " ^ Types.string_of_tipo t ^ " e " ^ Types.string_of_tipo t2)])
+        )
+      )
+    )
+  )
+
+  (* (nameless) Function definition, fun x : T = e1 in e2 *)
+  | Terms.Function (x, t, e1, e2) -> (
+    let t1, env', rules = typeinfer e1 env in (
+      let t2, env'', rules' = typeinfer e2 env' in (
+        if t1 = t then
+          (Types.Arrow (t1, t2), env'', rules @ rules' @ [("T-Fun", string_of_env env ^ " ⊢ " ^ Terms.ast_of_term e ^ ": " ^ Types.string_of_tipo t2)])
+        else
+          (Types.ExceptionType TypeError, env'', rules' @ [("TypeError (err 14)", "tipos de `e1` e `e2` devem ser iguais, mas sao " ^ Types.string_of_tipo t1 ^ " e " ^ Types.string_of_tipo t2)])
+      )
+    )
+  )
+
+  (* apply e1 e2, e1 @ e2 *)
+  | Terms.Application (e1, e2) -> (match typeinfer e1 env with
+    | Types.Arrow (t', t''), env', rules -> (match typeinfer e2 env' with
+      | t'', env'', rules' -> (t'', env'', rules @ rules' @ [("T-App", string_of_env env ^ " ⊢ " ^ Terms.ast_of_term e ^ ": " ^ Types.string_of_tipo t'')])
+      | _ -> (ExceptionType TypeError, env', rules @ [("ErrFun TypeMismatch", "o tipo do argumento `e2` (aplicando) da aplicação `e1 e2` nao corresponde ao tipo de argumento esperado: " ^ Types.string_of_tipo t'')])
+    )
+    | _ -> (ExceptionType TypeError, env, [("TypeError (err 15)", "argumento de `apply e1 e2` deve ser uma funcao, mas foi " ^ Terms.ast_of_term e1)])
+  )
+
+  | Raise e -> (match e with
+    | Terms.TypeError s -> (Types.ExceptionType TypeError, env, [("TypeError (err 11)", s)])
+    | Terms.RuntimeError s -> (Types.ExceptionType RuntimeError, env, [("RuntimeError (err 12)", s)])
+    | _ -> failwith "exceção não tratada"
+  )
+
+  | _ -> failwith ("não implementado: " ^ Terms.ast_of_term e)
 );;

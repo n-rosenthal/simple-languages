@@ -19,15 +19,24 @@ type term =
   | Snd of term                             (* snd e *)
   | Conditional of term * term * term       (* if e1 then e2 else e3 *)
   | Identifier of string                    (* x, identificador, var *)
-  | VarDefinition of binding * term         (* let x = e1 in e2 *)
-  | Function of binding * term              (* fun x -> e1 in e2 *)
+  | VarDefinition of string * term * term         (* let x = e1 in e2 *)
+  | Function of string * Types.tipo * term * term      (* fun x : T -> e1 in e2 *)
   | Application of term * term              (* e1 e2 *)
 
   (* extension: exception and error handling *)
   | TryWith of term * term                  (* try e1 with e2 *)
-  | Raise of term                           (* raise e1 *)
+  | Raise of error                           (* raise e1 *)
   | TypeError of string                     (* type error *)
-and binding = term * string;;               (*  name binding, associação de um termo a um nome *)
+and binding = term * string                 (*  name binding, associação de um termo a um nome *)
+and error =
+  | TypeError of string                     (* type error *)
+  | RuntimeError of string                  (* runtime error *)
+;;
+
+let rec string_of_error (e: error) : string = match e with
+  | TypeError s -> "type error: " ^ s
+  | RuntimeError s -> "runtime error: " ^ s
+;;
 
 let rec string_of_term (e: term) : string =
   match e with
@@ -39,12 +48,12 @@ let rec string_of_term (e: term) : string =
   | Snd e -> "snd " ^ string_of_term e
   | Conditional (e1, e2, e3) -> "if " ^ string_of_term e1 ^ " then " ^ string_of_term e2 ^ " else " ^ string_of_term e3
   | Identifier x -> x
-  | VarDefinition (b, e) -> "let " ^ string_of_binding b ^ " in " ^ string_of_term e
-  | Function (b, e2) -> "fun " ^ string_of_binding b ^ " in " ^ string_of_term e2
+  | VarDefinition (x, e1, e2) -> "let " ^ x ^ " = " ^ string_of_term e1 ^ " in " ^ string_of_term e2
+  | Function (x, t, e1, e2) -> "fun " ^ x ^ " : " ^ Types.string_of_tipo t ^ " -> " ^ string_of_term e1 ^ " in " ^ string_of_term e2
   | Application (e1, e2) -> string_of_term e1 ^ " @ " ^ string_of_term e2
 
   | TryWith (e1, e2) -> "try " ^ string_of_term e1 ^ " with " ^ string_of_term e2
-  | Raise e -> "raise " ^ string_of_term e
+  | Raise e -> "raise " ^ string_of_error e
   | TypeError s -> "type error: " ^ s
   | _ -> raise (Invalid_argument "string_of_term");
     and string_of_binding (b: binding) : string =
@@ -62,12 +71,12 @@ let rec ast_of_term (e: term) : string =
   | Snd e -> "(Snd (" ^ ast_of_term e ^ "))"
   | Conditional (e1, e2, e3) -> "(Conditional (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ ", " ^ ast_of_term e3 ^ "))"
   | Identifier x -> "(Identifier \"" ^ x ^ "\")"
-  | VarDefinition (b, e) -> "(VarDefinition (" ^ ast_of_binding b ^ ", " ^ ast_of_term e ^ "))"
-  | Function (b, e2) -> "(Function (" ^ ast_of_binding b ^ ", " ^ ast_of_term e2 ^ "))"
+  | VarDefinition (x, e1, e2) -> "(VarDefinition (\"" ^ x ^ "\", " ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
+  | Function (x, t, e1, e2) -> "(Function (" ^ x ^ ", " ^ Types.string_of_tipo t ^ ", " ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
   | Application (e1, e2) -> "(Application (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
 
   | TryWith (e1, e2) -> "(TryWith (" ^ ast_of_term e1 ^ ", " ^ ast_of_term e2 ^ "))"
-  | Raise e -> "(Raise (" ^ ast_of_term e ^ "))"
+  | Raise e -> "(Raise (" ^ string_of_error e ^ "))"
   | TypeError s -> "(TypeError \"" ^ s ^ "\")"
   | _ -> raise (Invalid_argument "string_of_term");
     and ast_of_binding (b: binding) : string =
@@ -91,12 +100,12 @@ let rec size (e: term) : int =
               | _ -> 0)
   | Conditional (e1, e2, e3) -> size e1 + size e2 + size e3 + 1
   | Identifier _ -> 1
-  | VarDefinition (b, e) -> (size (fst b) + size e)
-  | Function (b, e2) -> (size (fst b) + size e2 + 1)
+  | VarDefinition (x, e1, e2) -> (size (e1) + size (e2))
+  | Function (x, t, e1, e2) -> size e1 + size e2
   | Application (e1, e2) -> size e1 + size e2
 
   | TryWith (e1, e2) -> size e1 + size e2 + 1
-  | Raise e -> size e + 1
+  | Raise e -> 1
   | TypeError _ -> 1
 ;;
 
@@ -114,12 +123,12 @@ let rec depth (e: term) : int =
               | _ -> 0)
   | Conditional (e1, e2, e3) -> max (depth e1) (max (depth e2) (depth e3)) + 1
   | Identifier _ -> 1
-  | VarDefinition (b, e) -> max (depth (fst b)) (depth e)
-  | Function (b, e2) -> max (depth (fst b)) (depth e2) + 1
+  | VarDefinition (x, e1, e2) -> max (depth e1) (depth e2)
+  | Function (x, t, e1, e2) -> max (depth e1) (depth e2)
   | Application (e1, e2) -> max (depth e1) (depth e2)
 
   | TryWith (e1, e2) -> max (depth e1) (depth e2) + 1
-  | Raise e -> depth e + 1
+  | Raise e ->  1
   | TypeError _ -> 1
 ;;
 
@@ -134,12 +143,12 @@ let rec constants (e: term) : string list =
   | Snd e -> constants e
   | Conditional (e1, e2, e3) -> constants e1 @ constants e2 @ constants e3
   | Identifier x -> [x]
-  | VarDefinition (b, e) -> constants (fst b) @ constants e
-  | Function (b, e2) -> constants (fst b) @ constants e2
+  | VarDefinition (x, e1, e2) -> constants e1 @ constants e2
+  | Function (x, t, e1, e2) -> constants e1 @ constants e2
   | Application (e1, e2) -> constants e1 @ constants e2
 
   | TryWith (e1, e2) -> constants e1 @ constants e2
-  | Raise e -> constants e
+  | Raise e -> []
   | TypeError _ -> []
 ;;
 
@@ -223,9 +232,9 @@ let rec value_of_term (e: term) : value option =
     | Identifier _ -> None
 
     (* let x = e1 in e2, onde `nb = (x, e1)`*)
-    | VarDefinition (nb, e) -> (
-      match value_of_term (fst nb) with
-      | Some _ -> value_of_term e
+    | VarDefinition (x, e1, e2) -> (
+      match value_of_term e1 with
+      | Some v -> value_of_term e2
       | None -> None
     )
 
@@ -235,11 +244,7 @@ let rec value_of_term (e: term) : value option =
       | None -> value_of_term e2
     )
 
-    | Raise e -> (
-      match value_of_term e with
-      | Some (Error s) -> Some (Error s)
-      | Some _ -> None
-      | None -> None
+    | Raise e -> (None
     )
 
     | _ -> raise (ValueError ("value_of_term: not a value", Some e))
@@ -252,3 +257,26 @@ let rec is_numeric (e : term) : bool =
   | _ -> false
 ;;
 
+let rec value_of_term (t : term) : value =
+  match t with
+  | None -> Unit
+  | Integer n -> VInt n
+  | Boolean b -> VBool b
+  | OrderedPair (t1, t2) ->
+      (* ensure both sides are values *)
+      VPair (value_of_term t1, value_of_term t2)
+  | _ -> failwith ("NotImplemented" ^ string_of_term t)
+;;
+
+let rec term_of_value (v : value) : term =
+  match v with
+  | Unit -> None
+  | VInt n -> Integer n
+  | VBool b -> Boolean b
+  | VPair (v1, v2) ->
+      OrderedPair (term_of_value v1, term_of_value v2)
+  | Closure (_, body) ->
+      (* closures are runtime-only; they don’t have a direct surface syntax *)
+      body
+
+  | _ -> failwith ("NotImplemented" ^ string_of_value v)
