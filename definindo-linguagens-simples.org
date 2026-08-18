@@ -1,0 +1,1470 @@
+** leitura de /input/ e construção de linhas de código
+:PROPERTIES:
+:TID: 20260817101916
+:END:
+Dado um /caminho para arquivo/ (~String~), gostaríamos de *ler* o conteúdo do arquivo para variável local e *quebrá-lo* em /linhas de código fonte/.
+
+Após a documentação à nível de módulo para ~scanner.rs~, importamos módulos da biblioteca padrão do Rust para lidar com arquivos e com operações de entrada e saída. ~Path~ e ~PathBuf~ são ...
+
+#+name: language-s--scanner-types--docs
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+//! S/src/Scanner/Types.rs
+//!
+//! Definições dos tipos necessários para implementação
+//! do scanner para linguagem S.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use crate::Scanner::Errors::ScannerError;
+#+end_src
+
+*** arquivo de entrada
+:PROPERTIES:
+:TID: 20260817103604
+:END:
+Um *arquivo de entrada* para o /scanner/ (e consequentemente para todo o sistema) é definido pelo seu caminho no sistema de arquivos atual, pelo seu conteúdo e pela primeira operação que desejamos aplicar, a análise do conteúdo do arquivo em linhas.
+
+#+name: language-s--scanner-types--SourceFile
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+/// Representa um arquivo-fonte de `S` já lido em memória.
+#[derive(Debug, Clone)]
+pub struct SourceFile {
+    /// Caminho original do arquivo.
+    pub path: PathBuf,
+
+    /// Conteúdo bruto do arquivo, sem modificações.
+    pub content: String,
+
+    /// Conteúdo quebrado em linhas (sem o `\n` final de cada uma).
+    pub lines: Vec<String>,
+}
+#+end_src
+
+Em Rust, usamos ~#[derive...]~ para ..... ~Debug~ e ~Clone~ são...
+Quando definimos um campo de uma /struct/ como ~pub~, ...
+*** sistema de tipos
+:PROPERTIES:
+:TID: 20260817130000
+:END:
+Conforme a gramática, ~type := Integer | Boolean~. O /type-checker/ infere o tipo de um ~Term~ e rejeita operações mal-tipadas antes de qualquer avaliação.
+
+#+name: language-s--scanner-types--Type
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+/// Tipos de `S`, conforme a gramática: `type := Integer | Boolean`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    Integer,
+    Boolean,
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Type::Integer => "Integer",
+            Type::Boolean => "Boolean",
+        };
+        write!(f, "{name}")
+    }
+}
+#+end_src
+*** erros de leitura de arquivo
+:PROPERTIES:
+:TID: 20260817103740
+:END:
+Em ~Scanner/Errors.rs~, definimos as exceções que podem ser levantadas pelo /scanner/ quando não é possível ler um arquivo-fonte.
+
+#+name: language-s--scanner-types--ScannerError
+#+begin_src rust :results output :tangle S/src/Scanner/Errors.rs
+//! S/src/Scanner/Errors.rs
+//!
+//! Definição dos erros possíveis de ocorrência durante a execução
+//! do módulo Scanner.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use std::io;
+use std::path::PathBuf;
+
+/// Erros possíveis na leitura de um arquivo-fonte.
+#[derive(Debug)]
+pub enum ScannerError {
+    /// Falha de I/O ao abrir ou ler o arquivo (caminho inválido, sem
+    /// permissão, etc.).
+    Io(io::Error),
+
+    /// O arquivo existe e foi lido, mas está vazio.
+    EmptyFile(PathBuf),
+}
+
+impl std::fmt::Display for ScannerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScannerError::Io(err) => write!(f, "erro de I/O: {err}"),
+            ScannerError::EmptyFile(path) => {
+                write!(f, "arquivo vazio: {}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ScannerError {}
+
+impl From<io::Error> for ScannerError {
+    fn from(err: io::Error) -> Self {
+        ScannerError::Io(err)
+    }
+}
+#+end_src
+
+#+name: language-s--scanner-types--SourceFile-impl
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+impl SourceFile {
+    /// Lê o arquivo em `path`, quebra o conteúdo em linhas e retorna
+    /// um `SourceFile` pronto para as próximas etapas (lexer/parser).
+    ///
+    /// # Erros
+    /// Retorna `ScannerError::Io` se o arquivo não puder ser lido, ou
+    /// `ScannerError::EmptyFile` se o conteúdo lido for vazio.
+    pub fn read<P: AsRef<Path>>(path: P) -> Result<SourceFile, ScannerError> {
+        let path = path.as_ref().to_path_buf();
+
+        let content = fs::read_to_string(&path)?;
+
+        if content.trim().is_empty() {
+            return Err(ScannerError::EmptyFile(path));
+        }
+
+        let lines: Vec<String> = content.lines().map(str::to_string).collect();
+
+        Ok(SourceFile {
+            path,
+            content,
+            lines,
+        })
+    }
+
+    /// Número total de linhas do arquivo-fonte.
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// Retorna a linha de índice `n` (0-indexado), se existir.
+    pub fn line(&self, n: usize) -> Option<&str> {
+        self.lines.get(n).map(String::as_str)
+    }
+}
+#+end_src
+
+#+name: language-s--scanner-types--SourceFile-tests
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Escreve `content` em um arquivo temporário único e devolve seu
+    /// caminho. O arquivo é fechado (via `drop`) antes de retornar,
+    /// garantindo que `SourceFile::read` consiga reabri-lo sem
+    /// conflito de handle, inclusive no Windows.
+    fn write_temp_file(content: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "s-scanner-test-{}-{}.s",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let mut file = fs::File::create(&path).expect("não foi possível criar arquivo temporário");
+        write!(file, "{content}").expect("não foi possível escrever no arquivo temporário");
+        drop(file);
+
+        path
+    }
+
+    #[test]
+    fn le_arquivo_e_quebra_em_linhas() {
+        let path = write_temp_file("1 + 2\ntrue == false\n");
+
+        let src = SourceFile::read(&path).expect("leitura deveria funcionar");
+
+        assert_eq!(src.line_count(), 2);
+        assert_eq!(src.line(0), Some("1 + 2"));
+        assert_eq!(src.line(1), Some("true == false"));
+        assert_eq!(src.line(2), None);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn arquivo_inexistente_retorna_erro_io() {
+        let result = SourceFile::read("/caminho/que/nao/existe.s");
+        assert!(matches!(result, Err(ScannerError::Io(_))));
+    }
+
+    #[test]
+    fn arquivo_vazio_retorna_erro_dedicado() {
+        let path = write_temp_file("");
+        let result = SourceFile::read(&path);
+        assert!(matches!(result, Err(ScannerError::EmptyFile(_))));
+        let _ = fs::remove_file(&path);
+    }
+}
+#+end_src
+
+*** wiring de módulos
+:PROPERTIES:
+:TID: 20260817110000
+:END:
+Precisamos declarar ~Scanner~ como módulo de ~Types~ e ~Errors~, e ~Scanner~ como módulo do crate.
+
+#+name: language-s--cargo-toml
+#+begin_src toml :tangle S/Cargo.toml
+[package]
+name = "s"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "s"
+path = "src/main.rs"
+#+end_src
+
+** análise léxica
+:PROPERTIES:
+:TID: 20260817110500
+:END:
+O /lexer/ consome um ~SourceFile~ e produz uma sequência de /tokens/. Cada token carrega sua posição (linha, coluna) para relatórios de erro futuros.
+
+Assumimos notação infixa para os operadores binários (~1 + 2~, ~true == false~), com base nos exemplos de teste já escritos para o scanner.
+
+#+name: language-s--lexer--token
+#+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
+//! S/src/Scanner/Lexer.rs
+//!
+//! Análise léxica: converte texto-fonte em uma sequência de tokens.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use std::iter::Peekable;
+use std::str::CharIndices;
+
+use crate::Scanner::Types::SourceFile;
+
+/// Um token da linguagem `S`, com sua posição de origem.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub line: usize,   // 1-indexado
+    pub column: usize, // 1-indexado
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    LiteralInteger(i64),
+    LiteralBoolean(bool),
+
+    Plus,   // Add
+    Minus,  // Sub
+    EqEq,   // Eq
+
+    LParen,
+    RParen,
+
+    Eof,
+}
+
+/// Erros possíveis durante a análise léxica.
+#[derive(Debug, PartialEq)]
+pub enum LexError {
+    UnexpectedChar { ch: char, line: usize, column: usize },
+    UnterminatedNumber { line: usize, column: usize },
+}
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LexError::UnexpectedChar { ch, line, column } => {
+                write!(f, "caractere inesperado '{ch}' em {line}:{column}")
+            }
+            LexError::UnterminatedNumber { line, column } => {
+                write!(f, "número malformado em {line}:{column}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LexError {}
+#+end_src
+
+#+name: language-s--lexer--struct
+#+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
+/// Percorre o conteúdo de um `SourceFile` produzindo tokens.
+pub struct Lexer<'a> {
+    source: &'a str,
+    chars: Peekable<CharIndices<'a>>,
+    line: usize,
+    column: usize,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new(source_file: &'a SourceFile) -> Self {
+        Lexer {
+            source: &source_file.content,
+            chars: source_file.content.char_indices().peekable(),
+            line: 1,
+            column: 1,
+        }
+    }
+
+    /// Consome todo o input e retorna a lista de tokens (terminada em
+    /// `TokenKind::Eof`), ou o primeiro erro léxico encontrado.
+    pub fn tokenize(mut self) -> Result<Vec<Token>, LexError> {
+        let mut tokens = Vec::new();
+
+        loop {
+            self.skip_whitespace();
+
+            let (line, column) = (self.line, self.column);
+
+            let Some(&(_, ch)) = self.chars.peek() else {
+                tokens.push(Token { kind: TokenKind::Eof, line, column });
+                break;
+            };
+
+            let kind = match ch {
+                '+' => { self.advance(); TokenKind::Plus }
+                '-' => { self.advance(); TokenKind::Minus }
+                '(' => { self.advance(); TokenKind::LParen }
+                ')' => { self.advance(); TokenKind::RParen }
+                '=' => {
+                    self.advance();
+                    match self.chars.peek() {
+                        Some(&(_, '=')) => { self.advance(); TokenKind::EqEq }
+                        _ => return Err(LexError::UnexpectedChar { ch: '=', line, column }),
+                    }
+                }
+                c if c.is_ascii_digit() => self.lex_integer(line, column)?,
+                c if c.is_alphabetic() || c == '_' => self.lex_keyword(line, column)?,
+                c => return Err(LexError::UnexpectedChar { ch: c, line, column }),
+            };
+
+            tokens.push(Token { kind, line, column });
+        }
+
+        Ok(tokens)
+    }
+
+    fn advance(&mut self) -> Option<char> {
+        let (_, ch) = self.chars.next()?;
+
+        if ch == '\n' {
+            self.line += 1;
+            self.column = 1;
+        } else {
+            self.column += 1;
+        }
+
+        Some(ch)
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(&(_, ch)) = self.chars.peek() {
+            if ch.is_whitespace() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn lex_integer(&mut self, line: usize, column: usize) -> Result<TokenKind, LexError> {
+        let mut digits = String::new();
+
+        while let Some(&(_, ch)) = self.chars.peek() {
+            if ch.is_ascii_digit() {
+                digits.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        digits
+            .parse::<i64>()
+            .map(TokenKind::LiteralInteger)
+            .map_err(|_| LexError::UnterminatedNumber { line, column })
+    }
+
+    fn lex_keyword(&mut self, _line: usize, _column: usize) -> Result<TokenKind, LexError> {
+        let mut word = String::new();
+
+        while let Some(&(_, ch)) = self.chars.peek() {
+            if ch.is_alphanumeric() || ch == '_' {
+                word.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        match word.as_str() {
+            "true"  => Ok(TokenKind::LiteralBoolean(true)),
+            "false" => Ok(TokenKind::LiteralBoolean(false)),
+            other => Err(LexError::UnexpectedChar {
+                ch: other.chars().next().unwrap_or('?'),
+                line: self.line,
+                column: self.column,
+            }),
+        }
+    }
+}
+#+end_src
+
+#+RESULTS: language-s--lexer--struct
+
+#+name: language-s--lexer--tests
+#+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Scanner::Types::SourceFile;
+    use std::path::PathBuf;
+
+    fn source_from(content: &str) -> SourceFile {
+        SourceFile {
+            path: PathBuf::from("<memória>"),
+            content: content.to_string(),
+            lines: content.lines().map(str::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn tokeniza_soma_de_inteiros() {
+        let src = source_from("1 + 2");
+        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
+
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::LiteralInteger(1),
+                TokenKind::Plus,
+                TokenKind::LiteralInteger(2),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokeniza_comparacao_de_booleanos() {
+        let src = source_from("true == false");
+        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
+
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::LiteralBoolean(true),
+                TokenKind::EqEq,
+                TokenKind::LiteralBoolean(false),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn caractere_desconhecido_gera_erro() {
+        let src = source_from("1 % 2");
+        let result = Lexer::new(&src).tokenize();
+        assert!(matches!(result, Err(LexError::UnexpectedChar { ch: '%', .. })));
+    }
+
+    #[test]
+    fn expressao_com_parenteses() {
+        let src = source_from("(1 - 2)");
+        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
+
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::LParen,
+                TokenKind::LiteralInteger(1),
+                TokenKind::Minus,
+                TokenKind::LiteralInteger(2),
+                TokenKind::RParen,
+                TokenKind::Eof,
+            ]
+        );
+    }
+}
+#+end_src
+
+#+begin_src bash :results verbatim
+cd S && cargo test
+#+end_src
+
+#+RESULTS:
+#+begin_example
+
+running 7 tests
+test Scanner::Lexer::tests::expressao_com_parenteses ... ok
+test Scanner::Lexer::tests::caractere_desconhecido_gera_erro ... ok
+test Scanner::Lexer::tests::tokeniza_comparacao_de_booleanos ... ok
+test Scanner::Types::tests::arquivo_inexistente_retorna_erro_io ... ok
+test Scanner::Lexer::tests::tokeniza_soma_de_inteiros ... ok
+test Scanner::Types::tests::arquivo_vazio_retorna_erro_dedicado ... ok
+test Scanner::Types::tests::le_arquivo_e_quebra_em_linhas ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+#+end_example
+
+*** árvore de sintaxe abstrata
+
+:PROPERTIES:
+:TID: 20260817120000
+:END:
+A gramática de \( S \) define ~term~ como sendo um /literal inteiro/, um /literal booleano/, ou uma /operação binária/ entre dois termos. Representamos isso como uma /AST/ (~Term~), independente de como o texto foi tokenizado.
+
+#+name: language-s--scanner-types--Term
+#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+/// Operadores binários de `S`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Eq,
+}
+
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let symbol = match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Eq  => "==",
+        };
+        write!(f, "{symbol}")
+    }
+}
+
+/// Um termo da linguagem `S`, conforme a gramática:
+///
+/// ```text
+/// term := LiteralInteger   n
+///      |  LiteralBoolean   b
+///      |  BinaryOperation  BinaryOperator, term, term
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum Term {
+    LiteralInteger(i64),
+    LiteralBoolean(bool),
+    BinaryOperation {
+        operator: BinaryOperator,
+        left: Box<Term>,
+        right: Box<Term>,
+    },
+}
+
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::LiteralInteger(n) => write!(f, "{n}"),
+            Term::LiteralBoolean(b) => write!(f, "{b}"),
+            Term::BinaryOperation { operator, left, right } => {
+                write!(f, "({left} {operator} {right})")
+            }
+        }
+    }
+}
+#+end_src
+
+** análise sintática
+:PROPERTIES:
+:TID: 20260817120500
+:END:
+O /parser/ consome a sequência de tokens produzida pelo /lexer/ e constrói um ~Term~. Usamos /descida recursiva/, com duas camadas de precedência: ~==~ tem a menor precedência, ~+~/~-~ têm a mesma precedência entre si e são avaliados à esquerda.
+
+#+name: language-s--parser--struct
+#+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
+//! S/src/Scanner/Parser.rs
+//!
+//! Análise sintática: converte a sequência de tokens em um `Term`.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use crate::Scanner::Lexer::{Token, TokenKind};
+use crate::Scanner::Types::{BinaryOperator, Term};
+
+/// Erros possíveis durante a análise sintática.
+#[derive(Debug, PartialEq)]
+pub enum ParseError {
+    UnexpectedToken { found: TokenKind, line: usize, column: usize },
+    UnexpectedEof,
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::UnexpectedToken { found, line, column } => {
+                write!(f, "token inesperado {found:?} em {line}:{column}")
+            }
+            ParseError::UnexpectedEof => write!(f, "fim de entrada inesperado"),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+/// Consome uma sequência de `Token` e produz um `Term`.
+pub struct Parser {
+    tokens: Vec<Token>,
+    position: usize,
+}
+#+end_src
+
+#+name: language-s--parser--impl
+#+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Parser { tokens, position: 0 }
+    }
+
+    /// Analisa a entrada completa e retorna o `Term` resultante.
+    ///
+    /// Retorna erro se, após consumir um termo válido, ainda sobrarem
+    /// tokens não consumidos (exceto `Eof`).
+    pub fn parse(mut self) -> Result<Term, ParseError> {
+        let term = self.parse_equality()?;
+
+        match self.peek_kind() {
+            TokenKind::Eof => Ok(term),
+            found => Err(ParseError::UnexpectedToken {
+                found: found.clone(),
+                line: self.peek().line,
+                column: self.peek().column,
+            }),
+        }
+    }
+
+    // equality := additive ( "==" additive )*
+    fn parse_equality(&mut self) -> Result<Term, ParseError> {
+        let mut left = self.parse_additive()?;
+
+        while matches!(self.peek_kind(), TokenKind::EqEq) {
+            self.advance();
+            let right = self.parse_additive()?;
+            left = Term::BinaryOperation {
+                operator: BinaryOperator::Eq,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    // additive := primary ( ("+" | "-") primary )*
+    fn parse_additive(&mut self) -> Result<Term, ParseError> {
+        let mut left = self.parse_primary()?;
+
+        loop {
+            let operator = match self.peek_kind() {
+                TokenKind::Plus  => BinaryOperator::Add,
+                TokenKind::Minus => BinaryOperator::Sub,
+                _ => break,
+            };
+
+            self.advance();
+            let right = self.parse_primary()?;
+
+            left = Term::BinaryOperation {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    // primary := INTEGER | BOOLEAN | "(" equality ")"
+    fn parse_primary(&mut self) -> Result<Term, ParseError> {
+        let token = self.peek().clone();
+
+        match token.kind {
+            TokenKind::LiteralInteger(n) => {
+                self.advance();
+                Ok(Term::LiteralInteger(n))
+            }
+            TokenKind::LiteralBoolean(b) => {
+                self.advance();
+                Ok(Term::LiteralBoolean(b))
+            }
+            TokenKind::LParen => {
+                self.advance();
+                let inner = self.parse_equality()?;
+                self.expect(TokenKind::RParen)?;
+                Ok(inner)
+            }
+            TokenKind::Eof => Err(ParseError::UnexpectedEof),
+            found => Err(ParseError::UnexpectedToken {
+                found,
+                line: token.line,
+                column: token.column,
+            }),
+        }
+    }
+
+    fn expect(&mut self, expected: TokenKind) -> Result<(), ParseError> {
+        if self.peek_kind() == &expected {
+            self.advance();
+            Ok(())
+        } else {
+            let token = self.peek();
+            Err(ParseError::UnexpectedToken {
+                found: token.kind.clone(),
+                line: token.line,
+                column: token.column,
+            })
+        }
+    }
+
+    fn peek(&self) -> &Token {
+        // seguro: `tokenize()` sempre termina com `Eof`, então nunca
+        // avançamos além do último token.
+        self.tokens.get(self.position).unwrap_or_else(|| {
+            self.tokens.last().expect("stream de tokens não deveria estar vazia")
+        })
+    }
+
+    fn peek_kind(&self) -> &TokenKind {
+        &self.peek().kind
+    }
+
+    fn advance(&mut self) -> &Token {
+        let token = &self.tokens[self.position.min(self.tokens.len() - 1)];
+        if self.position < self.tokens.len() - 1 {
+            self.position += 1;
+        }
+        token
+    }
+}
+#+end_src
+
+#+name: language-s--parser--tests
+#+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Scanner::Lexer::Lexer;
+    use crate::Scanner::Types::SourceFile;
+    use std::path::PathBuf;
+
+    fn parse_str(content: &str) -> Result<Term, ParseError> {
+        let src = SourceFile {
+            path: PathBuf::from("<memória>"),
+            content: content.to_string(),
+            lines: content.lines().map(str::to_string).collect(),
+        };
+        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
+        Parser::new(tokens).parse()
+    }
+
+    #[test]
+    fn parseia_soma_simples() {
+        let term = parse_str("1 + 2").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::BinaryOperation {
+                operator: BinaryOperator::Add,
+                left: Box::new(Term::LiteralInteger(1)),
+                right: Box::new(Term::LiteralInteger(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn soma_e_subtracao_sao_associativas_a_esquerda() {
+        // 1 + 2 - 3  =>  (1 + 2) - 3
+        let term = parse_str("1 + 2 - 3").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::BinaryOperation {
+                operator: BinaryOperator::Sub,
+                left: Box::new(Term::BinaryOperation {
+                    operator: BinaryOperator::Add,
+                    left: Box::new(Term::LiteralInteger(1)),
+                    right: Box::new(Term::LiteralInteger(2)),
+                }),
+                right: Box::new(Term::LiteralInteger(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn igualdade_tem_precedencia_menor_que_soma() {
+        // 1 + 2 == 3  =>  (1 + 2) == 3
+        let term = parse_str("1 + 2 == 3").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::BinaryOperation {
+                operator: BinaryOperator::Eq,
+                left: Box::new(Term::BinaryOperation {
+                    operator: BinaryOperator::Add,
+                    left: Box::new(Term::LiteralInteger(1)),
+                    right: Box::new(Term::LiteralInteger(2)),
+                }),
+                right: Box::new(Term::LiteralInteger(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn parenteses_alteram_precedencia() {
+        // 1 - (2 - 3)  !=  (1 - 2) - 3
+        let term = parse_str("1 - (2 - 3)").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::BinaryOperation {
+                operator: BinaryOperator::Sub,
+                left: Box::new(Term::LiteralInteger(1)),
+                right: Box::new(Term::BinaryOperation {
+                    operator: BinaryOperator::Sub,
+                    left: Box::new(Term::LiteralInteger(2)),
+                    right: Box::new(Term::LiteralInteger(3)),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn booleanos_e_comparacao() {
+        let term = parse_str("true == false").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::BinaryOperation {
+                operator: BinaryOperator::Eq,
+                left: Box::new(Term::LiteralBoolean(true)),
+                right: Box::new(Term::LiteralBoolean(false)),
+            }
+        );
+    }
+
+    #[test]
+    fn tokens_sobrando_gera_erro() {
+        // dois termos sem operador entre eles
+        let result = parse_str("1 2");
+        assert!(matches!(result, Err(ParseError::UnexpectedToken { .. })));
+    }
+
+    #[test]
+    fn entrada_vazia_gera_erro() {
+        let result = parse_str("");
+        assert!(matches!(result, Err(ParseError::UnexpectedEof)));
+    }
+}
+#+end_src
+
+** checagem de tipos
+:PROPERTIES:
+:TID: 20260817130500
+:END:
+O /type-checker/ percorre um ~Term~ recursivamente e infere seu ~Type~, rejeitando operações entre tipos incompatíveis (ex.: ~1 + true~).
+
+#+name: language-s--typechecker--struct
+#+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
+//! S/src/Scanner/TypeChecker.rs
+//!
+//! Checagem estática de tipos sobre a AST de `S`.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use crate::Scanner::Types::{BinaryOperator, Term, Type};
+
+/// Erros possíveis durante a checagem de tipos.
+#[derive(Debug, PartialEq)]
+pub enum TypeError {
+    /// Um operador foi aplicado a operando(s) de tipo incompatível.
+    Mismatch {
+        operator: BinaryOperator,
+        expected: Type,
+        found: Type,
+        side: Side,
+    },
+    /// `Eq` recebeu operandos de tipos diferentes entre si.
+    EqTypeMismatch { left: Type, right: Type },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl std::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeError::Mismatch { operator, expected, found, side } => {
+                let side_name = match side {
+                    Side::Left => "operando esquerdo",
+                    Side::Right => "operando direito",
+                };
+                write!(
+                    f,
+                    "operador '{operator}': {side_name} deveria ser {expected}, mas é {found}"
+                )
+            }
+            TypeError::EqTypeMismatch { left, right } => {
+                write!(f, "operador '==': tipos incompatíveis {left} e {right}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TypeError {}
+#+end_src
+
+#+name: language-s--typechecker--impl
+#+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
+/// Infere o `Type` de um `Term`, ou retorna o primeiro `TypeError`
+/// encontrado na subárvore.
+pub fn type_of(term: &Term) -> Result<Type, TypeError> {
+    match term {
+        Term::LiteralInteger(_) => Ok(Type::Integer),
+        Term::LiteralBoolean(_) => Ok(Type::Boolean),
+
+        Term::BinaryOperation { operator, left, right } => {
+            let left_ty = type_of(left)?;
+            let right_ty = type_of(right)?;
+
+            match operator {
+                BinaryOperator::Add | BinaryOperator::Sub => {
+                    if left_ty != Type::Integer {
+                        return Err(TypeError::Mismatch {
+                            operator: *operator,
+                            expected: Type::Integer,
+                            found: left_ty,
+                            side: Side::Left,
+                        });
+                    }
+                    if right_ty != Type::Integer {
+                        return Err(TypeError::Mismatch {
+                            operator: *operator,
+                            expected: Type::Integer,
+                            found: right_ty,
+                            side: Side::Right,
+                        });
+                    }
+                    Ok(Type::Integer)
+                }
+
+                BinaryOperator::Eq => {
+                    if left_ty != right_ty {
+                        return Err(TypeError::EqTypeMismatch {
+                            left: left_ty,
+                            right: right_ty,
+                        });
+                    }
+                    Ok(Type::Boolean)
+                }
+            }
+        }
+    }
+}
+#+end_src
+
+#+name: language-s--typechecker--tests
+#+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inteiro_literal_tem_tipo_integer() {
+        assert_eq!(type_of(&Term::LiteralInteger(42)), Ok(Type::Integer));
+    }
+
+    #[test]
+    fn booleano_literal_tem_tipo_boolean() {
+        assert_eq!(type_of(&Term::LiteralBoolean(true)), Ok(Type::Boolean));
+    }
+
+    #[test]
+    fn soma_de_inteiros_tem_tipo_integer() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Add,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralInteger(2)),
+        };
+        assert_eq!(type_of(&term), Ok(Type::Integer));
+    }
+
+    #[test]
+    fn soma_com_booleano_e_erro() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Add,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralBoolean(true)),
+        };
+        assert_eq!(
+            type_of(&term),
+            Err(TypeError::Mismatch {
+                operator: BinaryOperator::Add,
+                expected: Type::Integer,
+                found: Type::Boolean,
+                side: Side::Right,
+            })
+        );
+    }
+
+    #[test]
+    fn igualdade_entre_inteiros_tem_tipo_boolean() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralInteger(1)),
+        };
+        assert_eq!(type_of(&term), Ok(Type::Boolean));
+    }
+
+    #[test]
+    fn igualdade_entre_booleanos_tem_tipo_boolean() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralBoolean(true)),
+            right: Box::new(Term::LiteralBoolean(false)),
+        };
+        assert_eq!(type_of(&term), Ok(Type::Boolean));
+    }
+
+    #[test]
+    fn igualdade_entre_tipos_diferentes_e_erro() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralBoolean(true)),
+        };
+        assert_eq!(
+            type_of(&term),
+            Err(TypeError::EqTypeMismatch { left: Type::Integer, right: Type::Boolean })
+        );
+    }
+
+    #[test]
+    fn erro_de_tipo_em_subarvore_propaga() {
+        // (1 + true) - 2  =>  erro já no lado esquerdo da subtração
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Sub,
+            left: Box::new(Term::BinaryOperation {
+                operator: BinaryOperator::Add,
+                left: Box::new(Term::LiteralInteger(1)),
+                right: Box::new(Term::LiteralBoolean(true)),
+            }),
+            right: Box::new(Term::LiteralInteger(2)),
+        };
+        assert!(type_of(&term).is_err());
+    }
+}
+#+end_src
+
+** avaliação
+:PROPERTIES:
+:TID: 20260817131000
+:END:
+O /avaliador/ recebe um ~Term~ *já validado* pelo /type-checker/ e o reduz a um ~Value~. Chamar ~eval~ sobre um termo mal-tipado é contrato violado — os ramos correspondentes usam ~unreachable!()~ em vez de retornar erro, já que essa situação não deveria ocorrer no fluxo normal (~parse -> type_of -> eval~).
+
+#+name: language-s--evaluator--struct
+#+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
+//! S/src/Scanner/Evaluator.rs
+//!
+//! Avaliação de termos de `S` já validados pelo type-checker.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use crate::Scanner::Types::{BinaryOperator, Term};
+
+/// Resultado da avaliação de um `Term`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Integer(i64),
+    Boolean(bool),
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Integer(n) => write!(f, "{n}"),
+            Value::Boolean(b) => write!(f, "{b}"),
+        }
+    }
+}
+#+end_src
+
+#+name: language-s--evaluator--impl
+#+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
+/// Avalia um `Term` já validado pelo type-checker (`type_of`) e
+/// produz seu `Value`.
+///
+/// # Contrato
+/// Chame `type_of(term)` com sucesso antes de `eval(term)`. Termos
+/// mal-tipados (ex.: `1 + true`) causam pânico, pois representam
+/// violação do contrato do pipeline (`parse -> type_of -> eval`),
+/// não um erro de execução esperado.
+pub fn eval(term: &Term) -> Value {
+    match term {
+        Term::LiteralInteger(n) => Value::Integer(*n),
+        Term::LiteralBoolean(b) => Value::Boolean(*b),
+
+        Term::BinaryOperation { operator, left, right } => {
+            let left_val = eval(left);
+            let right_val = eval(right);
+
+            match operator {
+                BinaryOperator::Add => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Integer(a + b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Add mal-tipado"),
+                },
+                BinaryOperator::Sub => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Integer(a - b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Sub mal-tipado"),
+                },
+                BinaryOperator::Eq => Value::Boolean(left_val == right_val),
+            }
+        }
+    }
+}
+
+/// Conveniência: checa o tipo e avalia em sequência, retornando erro
+/// de tipo se o termo for mal-tipado (em vez de arriscar o `eval`
+/// direto sobre um termo não validado).
+pub fn type_check_and_eval(
+    term: &Term,
+) -> Result<Value, crate::Scanner::TypeChecker::TypeError> {
+    crate::Scanner::TypeChecker::type_of(term)?;
+    Ok(eval(term))
+}
+#+end_src
+
+#+name: language-s--evaluator--tests
+#+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn avalia_soma() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Add,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralInteger(2)),
+        };
+        assert_eq!(eval(&term), Value::Integer(3));
+    }
+
+    #[test]
+    fn avalia_subtracao() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Sub,
+            left: Box::new(Term::LiteralInteger(5)),
+            right: Box::new(Term::LiteralInteger(3)),
+        };
+        assert_eq!(eval(&term), Value::Integer(2));
+    }
+
+    #[test]
+    fn avalia_igualdade_entre_inteiros() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralInteger(4)),
+            right: Box::new(Term::LiteralInteger(4)),
+        };
+        assert_eq!(eval(&term), Value::Boolean(true));
+    }
+
+    #[test]
+    fn avalia_igualdade_entre_booleanos() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralBoolean(true)),
+            right: Box::new(Term::LiteralBoolean(true)),
+        };
+        assert_eq!(eval(&term), Value::Boolean(true));
+    }
+
+    #[test]
+    fn avalia_expressao_aninhada() {
+        // (1 + 2) - 3  =>  0
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Sub,
+            left: Box::new(Term::BinaryOperation {
+                operator: BinaryOperator::Add,
+                left: Box::new(Term::LiteralInteger(1)),
+                right: Box::new(Term::LiteralInteger(2)),
+            }),
+            right: Box::new(Term::LiteralInteger(3)),
+        };
+        assert_eq!(eval(&term), Value::Integer(0));
+    }
+
+    #[test]
+    fn type_check_and_eval_rejeita_termo_mal_tipado() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Add,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralBoolean(true)),
+        };
+        assert!(type_check_and_eval(&term).is_err());
+    }
+
+    #[test]
+    fn type_check_and_eval_aceita_termo_bem_tipado() {
+        let term = Term::BinaryOperation {
+            operator: BinaryOperator::Eq,
+            left: Box::new(Term::LiteralInteger(1)),
+            right: Box::new(Term::LiteralInteger(1)),
+        };
+        assert_eq!(type_check_and_eval(&term), Ok(Value::Boolean(true)));
+    }
+}
+#+end_src
+
+** REPL
+:PROPERTIES:
+:TID: 20260817140000
+:END:
+O /REPL/ (~read-eval-print loop~) lê uma linha do usuário por vez, roda o pipeline completo (~lexer -> parser -> type-checker -> evaluator~) e imprime o ~Value~ resultante ou o erro correspondente, sem encerrar a sessão em caso de erro.
+
+#+name: language-s--repl
+#+begin_src rust :results output :tangle S/src/Scanner/Repl.rs
+//! S/src/Scanner/Repl.rs
+//!
+//! Read-Eval-Print Loop para a linguagem `S`.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.1
+
+use std::io::{self, Write};
+use std::path::PathBuf;
+
+use crate::Scanner::Evaluator::type_check_and_eval;
+use crate::Scanner::Lexer::Lexer;
+use crate::Scanner::Parser::Parser;
+use crate::Scanner::Types::SourceFile;
+
+const PROMPT: &str = "S> ";
+
+/// Comandos especiais do REPL, reconhecidos antes de tentar
+/// interpretar a linha como um termo de `S`.
+enum ReplCommand {
+    Quit,
+    Help,
+    Term(String),
+}
+
+fn parse_command(line: &str) -> ReplCommand {
+    match line.trim() {
+        ":quit" | ":q" | "exit" => ReplCommand::Quit,
+        ":help" | ":h" => ReplCommand::Help,
+        other => ReplCommand::Term(other.to_string()),
+    }
+}
+
+fn print_help() {
+    println!("Comandos disponíveis:");
+    println!("  :help, :h     mostra esta mensagem");
+    println!("  :quit, :q     encerra o REPL");
+    println!("  <expressão>   analisa e avalia uma expressão de S");
+    println!();
+    println!("Exemplos: 1 + 2   |   true == false   |   (1 - 2) + 3");
+}
+
+/// Roda uma única linha de entrada através do pipeline completo e
+/// imprime o resultado (ou erro) no formato apropriado a cada etapa.
+fn run_line(line: &str) {
+    // Reaproveita `SourceFile` mesmo sem um arquivo real em disco,
+    // já que ele é só um contêiner de (path, content, lines).
+    let source = SourceFile {
+        path: PathBuf::from("<repl>"),
+        content: line.to_string(),
+        lines: vec![line.to_string()],
+    };
+
+    let tokens = match Lexer::new(&source).tokenize() {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            println!("erro léxico: {err}");
+            return;
+        }
+    };
+
+    let term = match Parser::new(tokens).parse() {
+        Ok(term) => term,
+        Err(err) => {
+            println!("erro sintático: {err}");
+            return;
+        }
+    };
+
+    match type_check_and_eval(&term) {
+        Ok(value) => println!("{term} : {value}"),
+        Err(err) => println!("erro de tipo: {err}"),
+    }
+}
+
+/// Inicia o loop interativo, lendo de stdin até EOF (Ctrl+D) ou até
+/// o usuário digitar um comando de saída.
+pub fn run() {
+    println!("S — linguagem de termos (REPL). Digite :help para ajuda, :quit para sair.");
+
+    let stdin = io::stdin();
+    let mut input = String::new();
+
+    loop {
+        print!("{PROMPT}");
+        io::stdout().flush().expect("falha ao escrever no stdout");
+
+        input.clear();
+        let bytes_read = stdin.read_line(&mut input).expect("falha ao ler stdin");
+
+        // EOF (Ctrl+D): read_line retorna 0 bytes lidos.
+        if bytes_read == 0 {
+            println!();
+            break;
+        }
+
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match parse_command(trimmed) {
+            ReplCommand::Quit => break,
+            ReplCommand::Help => print_help(),
+            ReplCommand::Term(text) => run_line(&text),
+        }
+    }
+}
+#+end_src
+
+#+name: language-s--repl-tests
+#+begin_src rust :results output :tangle S/src/Scanner/Repl.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `run_line` imprime em stdout em vez de retornar um valor, então
+    // os testes aqui cobrem só a análise de comandos — a parte
+    // testável sem capturar stdout.
+
+    #[test]
+    fn reconhece_comando_de_saida() {
+        assert!(matches!(parse_command(":quit"), ReplCommand::Quit));
+        assert!(matches!(parse_command(":q"), ReplCommand::Quit));
+        assert!(matches!(parse_command("exit"), ReplCommand::Quit));
+    }
+
+    #[test]
+    fn reconhece_comando_de_ajuda() {
+        assert!(matches!(parse_command(":help"), ReplCommand::Help));
+        assert!(matches!(parse_command(":h"), ReplCommand::Help));
+    }
+
+    #[test]
+    fn linha_comum_vira_termo() {
+        match parse_command("1 + 2") {
+            ReplCommand::Term(text) => assert_eq!(text, "1 + 2"),
+            _ => panic!("deveria reconhecer como termo"),
+        }
+    }
+}
+#+end_src
+
+*** wiring de módulos (final, com REPL)
+:PROPERTIES:
+:TID: 20260817140500
+:END:
+#+name: language-s--scanner-mod
+#+begin_src rust :results output :tangle S/src/Scanner/mod.rs
+//! S/src/Scanner/mod.rs
+//! Declaração dos submódulos de `Scanner`.
+pub mod Types;
+pub mod Errors;
+pub mod Lexer;
+pub mod Parser;
+pub mod TypeChecker;
+pub mod Evaluator;
+pub mod Repl;
+#+end_src
+
+#+name: language-s--main
+#+begin_src rust :results output :tangle S/src/main.rs
+//! S/src/main.rs
+//! Ponto de entrada do interpretador de `S`.
+pub mod Scanner;
+
+use Scanner::Evaluator::type_check_and_eval;
+use Scanner::Lexer::Lexer;
+use Scanner::Parser::Parser;
+use Scanner::Types::SourceFile;
+
+fn run_file(path: &str) {
+    let source = match SourceFile::read(path) {
+        Ok(src) => src,
+        Err(err) => {
+            eprintln!("erro ao ler arquivo: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    let tokens = match Lexer::new(&source).tokenize() {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            eprintln!("erro léxico: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    let term = match Parser::new(tokens).parse() {
+        Ok(term) => term,
+        Err(err) => {
+            eprintln!("erro sintático: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    match type_check_and_eval(&term) {
+        Ok(value) => println!("{term} = {value}"),
+        Err(err) => {
+            eprintln!("erro de tipo: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn main() {
+    match std::env::args().nth(1) {
+        Some(path) => run_file(&path),
+        None => Scanner::Repl::run(),
+    }
+}
+#+end_src
