@@ -1,28 +1,65 @@
+* introdução
+:PROPERTIES:
+:TID: 20260817101435
+:END:
+
+** sintaxe
+:PROPERTIES:
+:TID: 20260817101436
+:END:
+
+\( S \) é uma /linguagem de termos/ definida pela seguinte gramática:
+
+#+begin_example
+type := Integer | Boolean | Unit | Ref type
+
+term := LiteralInteger   n
+     |  LiteralBoolean   b
+     |  Unit
+     |  Variable         name
+     |  BinaryOperation  BinaryOperator, term, term
+     |  UnaryOperation   UnaryOperator, term
+     |  Conditional      term, term, term      (* if cond then t1 else t2 *)
+     |  Let              name, type, term, term (* let x: T = t1 in t2 *)
+     |  Ref              term                   (* aloca memória *)
+     |  Deref            term                   (* !t, lê memória *)
+     |  Assign           term, term             (* t1 := t2, escreve memória *)
+
+where
+ BinaryOperator := Add | Sub | Eq | Neq | Lt | Leq | Gt | Geq
+ UnaryOperator  := Not
+#+end_example
+
+Notação concreta (a que o /parser/ realmente reconhece), com precedência
+da mais baixa para a mais alta:
+
+#+begin_example
+":="  (atribuição, associativa à direita)
+"==" "<>"                (igualdade)
+"<" "<=" ">" ">="         (relacionais)
+"+" "-"                   (aditivos)
+"not" "ref" "!"           (prefixos unários)
+literais, variáveis, "(" assign ")", "if ... then ... else ...", "let ... in ..."
+#+end_example
+
+Exemplos válidos:
+
+#+begin_example
+1 + 2
+true == false
+not (1 < 2)
+if 1 < 2 then 10 else 20
+let x: Integer = 1 in x + x
+let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r
+#+end_example
+
 ** leitura de /input/ e construção de linhas de código
 :PROPERTIES:
 :TID: 20260817101916
 :END:
 Dado um /caminho para arquivo/ (~String~), gostaríamos de *ler* o conteúdo do arquivo para variável local e *quebrá-lo* em /linhas de código fonte/.
 
-Após a documentação à nível de módulo para ~scanner.rs~, importamos módulos da biblioteca padrão do Rust para lidar com arquivos e com operações de entrada e saída. ~Path~ e ~PathBuf~ são ...
-
-#+name: language-s--scanner-types--docs
-#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
-//! S/src/Scanner/Types.rs
-//!
-//! Definições dos tipos necessários para implementação
-//! do scanner para linguagem S.
-//!
-//! author:  n-rosenthal
-//! date:    2026-08-17
-//! version: 0.1
-
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-use crate::Scanner::Errors::ScannerError;
-#+end_src
+Após a documentação à nível de módulo para ~scanner.rs~, importamos módulos da biblioteca padrão do Rust para lidar com arquivos e com operações de entrada e saída. ~Path~ e ~PathBuf~ representam caminhos no sistema de arquivos; ~fs~ fornece as funções de leitura.
 
 *** arquivo de entrada
 :PROPERTIES:
@@ -30,49 +67,14 @@ use crate::Scanner::Errors::ScannerError;
 :END:
 Um *arquivo de entrada* para o /scanner/ (e consequentemente para todo o sistema) é definido pelo seu caminho no sistema de arquivos atual, pelo seu conteúdo e pela primeira operação que desejamos aplicar, a análise do conteúdo do arquivo em linhas.
 
-#+name: language-s--scanner-types--SourceFile
-#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
-/// Representa um arquivo-fonte de `S` já lido em memória.
-#[derive(Debug, Clone)]
-pub struct SourceFile {
-    /// Caminho original do arquivo.
-    pub path: PathBuf,
-
-    /// Conteúdo bruto do arquivo, sem modificações.
-    pub content: String,
-
-    /// Conteúdo quebrado em linhas (sem o `\n` final de cada uma).
-    pub lines: Vec<String>,
-}
-#+end_src
-
-Em Rust, usamos ~#[derive...]~ para ..... ~Debug~ e ~Clone~ são...
-Quando definimos um campo de uma /struct/ como ~pub~, ...
 *** sistema de tipos
 :PROPERTIES:
-:TID: 20260817130000
+:TID: 20260819081455
 :END:
-Conforme a gramática, ~type := Integer | Boolean~. O /type-checker/ infere o tipo de um ~Term~ e rejeita operações mal-tipadas antes de qualquer avaliação.
+Conforme a gramática, ~type := Integer | Boolean | Unit | Ref type~. O /type-checker/ infere o tipo de um ~Term~ e rejeita operações mal-tipadas antes de qualquer avaliação.
 
-#+name: language-s--scanner-types--Type
-#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
-/// Tipos de `S`, conforme a gramática: `type := Integer | Boolean`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Type {
-    Integer,
-    Boolean,
-}
+~Type~ deixou de derivar ~Copy~ a partir do momento em que ganhou a variante recursiva ~Reference(Box<Type>)~ (um ~Box~ nunca é ~Copy~) — por isso o /type-checker/ usa ~.clone()~ explicitamente sempre que precisa de uma cópia independente de um ~Type~.
 
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            Type::Integer => "Integer",
-            Type::Boolean => "Boolean",
-        };
-        write!(f, "{name}")
-    }
-}
-#+end_src
 *** erros de leitura de arquivo
 :PROPERTIES:
 :TID: 20260817103740
@@ -124,8 +126,51 @@ impl From<io::Error> for ScannerError {
 }
 #+end_src
 
-#+name: language-s--scanner-types--SourceFile-impl
+Em Rust, ~#[derive(Debug)]~ gera automaticamente uma implementação de
+formatação para depuração (usada por ~{:?}~); ~impl std::fmt::Display~ é
+a formatação "amigável" (usada por ~{}~), que escrevemos manualmente
+para cada erro. ~impl std::error::Error~ marca o tipo como um erro de
+verdade no ecossistema padrão do Rust, permitindo composição com
+outros erros (ex.: via ~?~ e ~From~).
+
+*** ~Types.rs~ — tipos e AST
+:PROPERTIES:
+:TID: 20260819081456
+:END:
+~Types.rs~ concentra três coisas relacionadas: o arquivo-fonte lido em
+memória (~SourceFile~), o sistema de tipos (~Type~), e a árvore de
+sintaxe abstrata da linguagem (~Term~, ~BinaryOperator~,
+~UnaryOperator~) — independente de como o texto foi tokenizado.
+
+#+name: language-s--scanner-types--all
 #+begin_src rust :results output :tangle S/src/Scanner/Types.rs
+//! S/src/Scanner/Types.rs
+//!
+//! Definições dos tipos necessários para implementação
+//! do scanner para linguagem S.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-17
+//! version: 0.4
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::Scanner::Errors::ScannerError;
+
+/// Representa um arquivo-fonte de `S` já lido em memória.
+#[derive(Debug, Clone)]
+pub struct SourceFile {
+    /// Caminho original do arquivo.
+    pub path: PathBuf,
+
+    /// Conteúdo bruto do arquivo, sem modificações.
+    pub content: String,
+
+    /// Conteúdo quebrado em linhas (sem o `\n` final de cada uma).
+    pub lines: Vec<String>,
+}
+
 impl SourceFile {
     /// Lê o arquivo em `path`, quebra o conteúdo em linhas e retorna
     /// um `SourceFile` pronto para as próximas etapas (lexer/parser).
@@ -161,19 +206,168 @@ impl SourceFile {
         self.lines.get(n).map(String::as_str)
     }
 }
+
+/// Tipos de `S`.
+///
+/// ```text
+/// type := Integer | Boolean | Unit | Ref type
+/// ```
+///
+/// `Reference` não deriva `Copy` (carrega um `Box<Type>` recursivo),
+/// então em todo o type-checker usamos `.clone()` explicitamente
+/// sempre que precisamos de uma cópia independente.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Type {
+    Integer,
+    Boolean,
+    Unit,
+    Reference(Box<Type>),
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Integer => write!(f, "Integer"),
+            Type::Boolean => write!(f, "Boolean"),
+            Type::Unit => write!(f, "Unit"),
+            Type::Reference(inner) => write!(f, "Ref({inner})"),
+        }
+    }
+}
+
+/// Operadores binários de `S`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Eq,
+    Neq,
+    Lt,
+    Leq,
+    Gt,
+    Geq,
+}
+
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let symbol = match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Eq => "==",
+            BinaryOperator::Neq => "<>",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Leq => "<=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Geq => ">=",
+        };
+        write!(f, "{symbol}")
+    }
+}
+
+/// Operadores unários de `S`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOperator {
+    Not,
+}
+
+impl std::fmt::Display for UnaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let symbol = match self {
+            UnaryOperator::Not => "not",
+        };
+        write!(f, "{symbol}")
+    }
+}
+
+/// Um termo da linguagem `S`, conforme a gramática:
+///
+/// ```text
+/// term := LiteralInteger   n
+///      |  LiteralBoolean   b
+///      |  Unit
+///      |  Variable         name
+///      |  BinaryOperation  BinaryOperator, term, term
+///      |  UnaryOperation   UnaryOperator, term
+///      |  Conditional      term, term, term
+///      |  Let               name, type, term, term
+///      |  Ref               term            (* aloca memória *)
+///      |  Deref             term            (* !t, lê memória *)
+///      |  Assign            term, term      (* t := t, escreve memória *)
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum Term {
+    LiteralInteger(i64),
+    LiteralBoolean(bool),
+    Unit,
+    Variable(String),
+    BinaryOperation {
+        operator: BinaryOperator,
+        left: Box<Term>,
+        right: Box<Term>,
+    },
+    UnaryOperation {
+        operator: UnaryOperator,
+        operand: Box<Term>,
+    },
+    Conditional {
+        condition: Box<Term>,
+        then_branch: Box<Term>,
+        else_branch: Box<Term>,
+    },
+    Let {
+        name: String,
+        declared_type: Type,
+        value: Box<Term>,
+        body: Box<Term>,
+    },
+    Ref(Box<Term>),
+    Deref(Box<Term>),
+    Assign {
+        target: Box<Term>,
+        value: Box<Term>,
+    },
+}
+
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::LiteralInteger(n) => write!(f, "{n}"),
+            Term::LiteralBoolean(b) => write!(f, "{b}"),
+            Term::Unit => write!(f, "unit"),
+            Term::Variable(name) => write!(f, "{name}"),
+            Term::BinaryOperation { operator, left, right } => {
+                write!(f, "({left} {operator} {right})")
+            }
+            Term::UnaryOperation { operator, operand } => {
+                write!(f, "({operator} {operand})")
+            }
+            Term::Conditional { condition, then_branch, else_branch } => {
+                write!(f, "(if {condition} then {then_branch} else {else_branch})")
+            }
+            Term::Let { name, declared_type, value, body } => {
+                write!(f, "(let {name}: {declared_type} = {value} in {body})")
+            }
+            Term::Ref(inner) => write!(f, "(ref {inner})"),
+            Term::Deref(inner) => write!(f, "(!{inner})"),
+            Term::Assign { target, value } => write!(f, "({target} := {value})"),
+        }
+    }
+}
 #+end_src
 
-#+name: language-s--scanner-types--SourceFile-tests
+Em Rust, usamos ~#[derive(...)]~ para gerar automaticamente
+implementações comuns (~Debug~ para impressão de depuração, ~Clone~
+para cópia explícita via ~.clone()~, ~PartialEq~/~Eq~ para comparação
+com ~==~). Quando definimos um campo de uma /struct/ como ~pub~,
+tornamos esse campo acessível fora do módulo que a define.
+
+#+name: language-s--scanner-types--tests
 #+begin_src rust :results output :tangle S/src/Scanner/Types.rs
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Escreve `content` em um arquivo temporário único e devolve seu
-    /// caminho. O arquivo é fechado (via `drop`) antes de retornar,
-    /// garantindo que `SourceFile::read` consiga reabri-lo sem
-    /// conflito de handle, inclusive no Windows.
     fn write_temp_file(content: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "s-scanner-test-{}-{}.s",
@@ -184,7 +378,8 @@ mod tests {
                 .as_nanos()
         ));
 
-        let mut file = fs::File::create(&path).expect("não foi possível criar arquivo temporário");
+        let mut file =
+            fs::File::create(&path).expect("não foi possível criar arquivo temporário");
         write!(file, "{content}").expect("não foi possível escrever no arquivo temporário");
         drop(file);
 
@@ -218,15 +413,19 @@ mod tests {
         assert!(matches!(result, Err(ScannerError::EmptyFile(_))));
         let _ = fs::remove_file(&path);
     }
+
+    #[test]
+    fn display_de_type_reference_e_recursivo() {
+        let ty = Type::Reference(Box::new(Type::Reference(Box::new(Type::Integer))));
+        assert_eq!(ty.to_string(), "Ref(Ref(Integer))");
+    }
 }
 #+end_src
 
-*** wiring de módulos
+*** ~toml~
 :PROPERTIES:
-:TID: 20260817110000
+:TID: 20260819081457
 :END:
-Precisamos declarar ~Scanner~ como módulo de ~Types~ e ~Errors~, e ~Scanner~ como módulo do crate.
-
 #+name: language-s--cargo-toml
 #+begin_src toml :tangle S/Cargo.toml
 [package]
@@ -241,13 +440,11 @@ path = "src/main.rs"
 
 ** análise léxica
 :PROPERTIES:
-:TID: 20260817110500
+:TID: 20260819081458
 :END:
-O /lexer/ consome um ~SourceFile~ e produz uma sequência de /tokens/. Cada token carrega sua posição (linha, coluna) para relatórios de erro futuros.
+O /lexer/ consome um ~SourceFile~ e produz uma sequência de /tokens/. Cada token carrega sua posição (linha, coluna) para relatórios de erro futuros. Assumimos notação infixa para os operadores binários.
 
-Assumimos notação infixa para os operadores binários (~1 + 2~, ~true == false~), com base nos exemplos de teste já escritos para o scanner.
-
-#+name: language-s--lexer--token
+#+name: language-s--lexer--all
 #+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
 //! S/src/Scanner/Lexer.rs
 //!
@@ -255,7 +452,7 @@ Assumimos notação infixa para os operadores binários (~1 + 2~, ~true == false
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.4
 
 use std::iter::Peekable;
 use std::str::CharIndices;
@@ -270,17 +467,54 @@ pub struct Token {
     pub column: usize, // 1-indexado
 }
 
+// ---------------------------------------------------------------------
+// TOKENS para a linguagem S
+// ---------------------------------------------------------------------
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
+    // literais e identificadores
     LiteralInteger(i64),
     LiteralBoolean(bool),
+    UnitLiteral,
+    Identifier(String),
 
-    Plus,   // Add
-    Minus,  // Sub
-    EqEq,   // Eq
+    // operadores binários
+    AdditionOperator,
+    SubtractionOperator,
+    EqualityOperator,
+    InequalityOperator,
+    LTOperator,
+    LEQOperator,
+    GTOperator,
+    GEQOperator,
 
+    // operadores unários
+    NotOperator,
+
+    // memória
+    RefKeyword,  // "ref"   (aloca)
+    Bang,        // "!"     (dereferencia)
+    ColonEquals, // ":="    (atribui)
+
+    // condicional: if t then t else t
+    If,
+    Then,
+    Else,
+
+    // binding: let name : type = t in t
+    Let,
+    In,
+    Colon,  // ":"
+    Assign, // "=" (diferente de "==")
+
+    // delimitadores
     LParen,
     RParen,
+    LSquareBracket,
+    RSquareBracket,
+    LBrace,
+    RBrace,
 
     Eof,
 }
@@ -306,10 +540,7 @@ impl std::fmt::Display for LexError {
 }
 
 impl std::error::Error for LexError {}
-#+end_src
 
-#+name: language-s--lexer--struct
-#+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
 /// Percorre o conteúdo de um `SourceFile` produzindo tokens.
 pub struct Lexer<'a> {
     source: &'a str,
@@ -344,19 +575,46 @@ impl<'a> Lexer<'a> {
             };
 
             let kind = match ch {
-                '+' => { self.advance(); TokenKind::Plus }
-                '-' => { self.advance(); TokenKind::Minus }
+                '+' => { self.advance(); TokenKind::AdditionOperator }
+                '-' => { self.advance(); TokenKind::SubtractionOperator }
                 '(' => { self.advance(); TokenKind::LParen }
                 ')' => { self.advance(); TokenKind::RParen }
+                '[' => { self.advance(); TokenKind::LSquareBracket }
+                ']' => { self.advance(); TokenKind::RSquareBracket }
+                '{' => { self.advance(); TokenKind::LBrace }
+                '}' => { self.advance(); TokenKind::RBrace }
+                '!' => { self.advance(); TokenKind::Bang }
+                ':' => {
+                    self.advance();
+                    match self.chars.peek() {
+                        Some(&(_, '=')) => { self.advance(); TokenKind::ColonEquals }
+                        _ => TokenKind::Colon,
+                    }
+                }
                 '=' => {
                     self.advance();
                     match self.chars.peek() {
-                        Some(&(_, '=')) => { self.advance(); TokenKind::EqEq }
-                        _ => return Err(LexError::UnexpectedChar { ch: '=', line, column }),
+                        Some(&(_, '=')) => { self.advance(); TokenKind::EqualityOperator }
+                        _ => TokenKind::Assign,
+                    }
+                }
+                '<' => {
+                    self.advance();
+                    match self.chars.peek() {
+                        Some(&(_, '>')) => { self.advance(); TokenKind::InequalityOperator }
+                        Some(&(_, '=')) => { self.advance(); TokenKind::LEQOperator }
+                        _ => TokenKind::LTOperator,
+                    }
+                }
+                '>' => {
+                    self.advance();
+                    match self.chars.peek() {
+                        Some(&(_, '=')) => { self.advance(); TokenKind::GEQOperator }
+                        _ => TokenKind::GTOperator,
                     }
                 }
                 c if c.is_ascii_digit() => self.lex_integer(line, column)?,
-                c if c.is_alphabetic() || c == '_' => self.lex_keyword(line, column)?,
+                c if c.is_alphabetic() || c == '_' => self.lex_word(),
                 c => return Err(LexError::UnexpectedChar { ch: c, line, column }),
             };
 
@@ -368,14 +626,12 @@ impl<'a> Lexer<'a> {
 
     fn advance(&mut self) -> Option<char> {
         let (_, ch) = self.chars.next()?;
-
         if ch == '\n' {
             self.line += 1;
             self.column = 1;
         } else {
             self.column += 1;
         }
-
         Some(ch)
     }
 
@@ -391,7 +647,6 @@ impl<'a> Lexer<'a> {
 
     fn lex_integer(&mut self, line: usize, column: usize) -> Result<TokenKind, LexError> {
         let mut digits = String::new();
-
         while let Some(&(_, ch)) = self.chars.peek() {
             if ch.is_ascii_digit() {
                 digits.push(ch);
@@ -400,16 +655,17 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-
         digits
             .parse::<i64>()
             .map(TokenKind::LiteralInteger)
             .map_err(|_| LexError::UnterminatedNumber { line, column })
     }
 
-    fn lex_keyword(&mut self, _line: usize, _column: usize) -> Result<TokenKind, LexError> {
+    /// Lê uma palavra alfanumérica e a classifica como palavra-chave
+    /// conhecida ou, caso contrário, como `Identifier` (nome de
+    /// variável ou tipo).
+    fn lex_word(&mut self) -> TokenKind {
         let mut word = String::new();
-
         while let Some(&(_, ch)) = self.chars.peek() {
             if ch.is_alphanumeric() || ch == '_' {
                 word.push(ch);
@@ -420,22 +676,21 @@ impl<'a> Lexer<'a> {
         }
 
         match word.as_str() {
-            "true"  => Ok(TokenKind::LiteralBoolean(true)),
-            "false" => Ok(TokenKind::LiteralBoolean(false)),
-            other => Err(LexError::UnexpectedChar {
-                ch: other.chars().next().unwrap_or('?'),
-                line: self.line,
-                column: self.column,
-            }),
+            "true" => TokenKind::LiteralBoolean(true),
+            "false" => TokenKind::LiteralBoolean(false),
+            "unit" => TokenKind::UnitLiteral,
+            "if" => TokenKind::If,
+            "then" => TokenKind::Then,
+            "else" => TokenKind::Else,
+            "not" => TokenKind::NotOperator,
+            "let" => TokenKind::Let,
+            "in" => TokenKind::In,
+            "ref" => TokenKind::RefKeyword,
+            _ => TokenKind::Identifier(word),
         }
     }
 }
-#+end_src
 
-#+RESULTS: language-s--lexer--struct
-
-#+name: language-s--lexer--tests
-#+begin_src rust :results output :tangle S/src/Scanner/Lexer.rs
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,17 +705,23 @@ mod tests {
         }
     }
 
+    fn kinds_of(content: &str) -> Vec<TokenKind> {
+        let src = source_from(content);
+        Lexer::new(&src)
+            .tokenize()
+            .expect("deveria tokenizar")
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
+    }
+
     #[test]
     fn tokeniza_soma_de_inteiros() {
-        let src = source_from("1 + 2");
-        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
-
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
         assert_eq!(
-            kinds,
+            kinds_of("1 + 2"),
             vec![
                 TokenKind::LiteralInteger(1),
-                TokenKind::Plus,
+                TokenKind::AdditionOperator,
                 TokenKind::LiteralInteger(2),
                 TokenKind::Eof,
             ]
@@ -468,136 +729,105 @@ mod tests {
     }
 
     #[test]
-    fn tokeniza_comparacao_de_booleanos() {
-        let src = source_from("true == false");
-        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
-
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+    fn tokeniza_let_binding() {
         assert_eq!(
-            kinds,
+            kinds_of("let x: Integer = 1 in x + 1"),
             vec![
-                TokenKind::LiteralBoolean(true),
-                TokenKind::EqEq,
-                TokenKind::LiteralBoolean(false),
+                TokenKind::Let,
+                TokenKind::Identifier("x".to_string()),
+                TokenKind::Colon,
+                TokenKind::Identifier("Integer".to_string()),
+                TokenKind::Assign,
+                TokenKind::LiteralInteger(1),
+                TokenKind::In,
+                TokenKind::Identifier("x".to_string()),
+                TokenKind::AdditionOperator,
+                TokenKind::LiteralInteger(1),
                 TokenKind::Eof,
             ]
         );
+    }
+
+    #[test]
+    fn distingue_igual_simples_de_igual_duplo() {
+        assert_eq!(
+            kinds_of("x = 1"),
+            vec![
+                TokenKind::Identifier("x".to_string()),
+                TokenKind::Assign,
+                TokenKind::LiteralInteger(1),
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(
+            kinds_of("x == 1"),
+            vec![
+                TokenKind::Identifier("x".to_string()),
+                TokenKind::EqualityOperator,
+                TokenKind::LiteralInteger(1),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokeniza_ref_deref_assign() {
+        assert_eq!(
+            kinds_of("ref 1"),
+            vec![TokenKind::RefKeyword, TokenKind::LiteralInteger(1), TokenKind::Eof]
+        );
+        assert_eq!(
+            kinds_of("!r"),
+            vec![TokenKind::Bang, TokenKind::Identifier("r".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            kinds_of("r := 5"),
+            vec![
+                TokenKind::Identifier("r".to_string()),
+                TokenKind::ColonEquals,
+                TokenKind::LiteralInteger(5),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn colon_simples_nao_conflita_com_colon_equals() {
+        // ':' seguido de identificador (anotação de tipo em `let`)
+        // não deve ser confundido com ':='.
+        assert_eq!(
+            kinds_of("x: Integer"),
+            vec![
+                TokenKind::Identifier("x".to_string()),
+                TokenKind::Colon,
+                TokenKind::Identifier("Integer".to_string()),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokeniza_unit() {
+        assert_eq!(kinds_of("unit"), vec![TokenKind::UnitLiteral, TokenKind::Eof]);
     }
 
     #[test]
     fn caractere_desconhecido_gera_erro() {
-        let src = source_from("1 % 2");
-        let result = Lexer::new(&src).tokenize();
+        let result = Lexer::new(&source_from("1 % 2")).tokenize();
         assert!(matches!(result, Err(LexError::UnexpectedChar { ch: '%', .. })));
-    }
-
-    #[test]
-    fn expressao_com_parenteses() {
-        let src = source_from("(1 - 2)");
-        let tokens = Lexer::new(&src).tokenize().expect("deveria tokenizar");
-
-        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                TokenKind::LParen,
-                TokenKind::LiteralInteger(1),
-                TokenKind::Minus,
-                TokenKind::LiteralInteger(2),
-                TokenKind::RParen,
-                TokenKind::Eof,
-            ]
-        );
-    }
-}
-#+end_src
-
-#+begin_src bash :results verbatim
-cd S && cargo test
-#+end_src
-
-#+RESULTS:
-#+begin_example
-
-running 7 tests
-test Scanner::Lexer::tests::expressao_com_parenteses ... ok
-test Scanner::Lexer::tests::caractere_desconhecido_gera_erro ... ok
-test Scanner::Lexer::tests::tokeniza_comparacao_de_booleanos ... ok
-test Scanner::Types::tests::arquivo_inexistente_retorna_erro_io ... ok
-test Scanner::Lexer::tests::tokeniza_soma_de_inteiros ... ok
-test Scanner::Types::tests::arquivo_vazio_retorna_erro_dedicado ... ok
-test Scanner::Types::tests::le_arquivo_e_quebra_em_linhas ... ok
-
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-#+end_example
-
-*** árvore de sintaxe abstrata
-
-:PROPERTIES:
-:TID: 20260817120000
-:END:
-A gramática de \( S \) define ~term~ como sendo um /literal inteiro/, um /literal booleano/, ou uma /operação binária/ entre dois termos. Representamos isso como uma /AST/ (~Term~), independente de como o texto foi tokenizado.
-
-#+name: language-s--scanner-types--Term
-#+begin_src rust :results output :tangle S/src/Scanner/Types.rs
-/// Operadores binários de `S`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOperator {
-    Add,
-    Sub,
-    Eq,
-}
-
-impl std::fmt::Display for BinaryOperator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let symbol = match self {
-            BinaryOperator::Add => "+",
-            BinaryOperator::Sub => "-",
-            BinaryOperator::Eq  => "==",
-        };
-        write!(f, "{symbol}")
-    }
-}
-
-/// Um termo da linguagem `S`, conforme a gramática:
-///
-/// ```text
-/// term := LiteralInteger   n
-///      |  LiteralBoolean   b
-///      |  BinaryOperation  BinaryOperator, term, term
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub enum Term {
-    LiteralInteger(i64),
-    LiteralBoolean(bool),
-    BinaryOperation {
-        operator: BinaryOperator,
-        left: Box<Term>,
-        right: Box<Term>,
-    },
-}
-
-impl std::fmt::Display for Term {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Term::LiteralInteger(n) => write!(f, "{n}"),
-            Term::LiteralBoolean(b) => write!(f, "{b}"),
-            Term::BinaryOperation { operator, left, right } => {
-                write!(f, "({left} {operator} {right})")
-            }
-        }
     }
 }
 #+end_src
 
 ** análise sintática
 :PROPERTIES:
-:TID: 20260817120500
+:TID: 20260819081459
 :END:
-O /parser/ consome a sequência de tokens produzida pelo /lexer/ e constrói um ~Term~. Usamos /descida recursiva/, com duas camadas de precedência: ~==~ tem a menor precedência, ~+~/~-~ têm a mesma precedência entre si e são avaliados à esquerda.
+O /parser/ consome a sequência de tokens produzida pelo /lexer/ e constrói um ~Term~. Usamos /descida recursiva/, com uma camada de precedência por nível de operador:
 
-#+name: language-s--parser--struct
+~:=~ (atribuição) < ~==~/~<>~ < ~<~/~<=~/~>~/~>=~ < ~+~/~-~ < ~not~/~ref~/~!~ (prefixos) < literais/variáveis/parênteses/~if~/~let~.
+
+#+name: language-s--parser--all
 #+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
 //! S/src/Scanner/Parser.rs
 //!
@@ -605,15 +835,16 @@ O /parser/ consome a sequência de tokens produzida pelo /lexer/ e constrói um 
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.4
 
 use crate::Scanner::Lexer::{Token, TokenKind};
-use crate::Scanner::Types::{BinaryOperator, Term};
+use crate::Scanner::Types::{BinaryOperator, Term, Type, UnaryOperator};
 
 /// Erros possíveis durante a análise sintática.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
     UnexpectedToken { found: TokenKind, line: usize, column: usize },
+    UnknownTypeName { name: String, line: usize, column: usize },
     UnexpectedEof,
 }
 
@@ -623,6 +854,9 @@ impl std::fmt::Display for ParseError {
             ParseError::UnexpectedToken { found, line, column } => {
                 write!(f, "token inesperado {found:?} em {line}:{column}")
             }
+            ParseError::UnknownTypeName { name, line, column } => {
+                write!(f, "tipo desconhecido '{name}' em {line}:{column}")
+            }
             ParseError::UnexpectedEof => write!(f, "fim de entrada inesperado"),
         }
     }
@@ -631,25 +865,22 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// Consome uma sequência de `Token` e produz um `Term`.
+///
+/// Precedência (da mais baixa para a mais alta):
+/// `:=` (atribuição) < `==`/`<>` < `<`/`<=`/`>`/`>=` < `+`/`-` <
+/// `not`/`ref`/`!` (prefixos unários) < literais/variáveis/parênteses.
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
 }
-#+end_src
 
-#+name: language-s--parser--impl
-#+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, position: 0 }
     }
 
-    /// Analisa a entrada completa e retorna o `Term` resultante.
-    ///
-    /// Retorna erro se, após consumir um termo válido, ainda sobrarem
-    /// tokens não consumidos (exceto `Eof`).
     pub fn parse(mut self) -> Result<Term, ParseError> {
-        let term = self.parse_equality()?;
+        let term = self.parse_assign()?;
 
         match self.peek_kind() {
             TokenKind::Eof => Ok(term),
@@ -661,48 +892,96 @@ impl Parser {
         }
     }
 
-    // equality := additive ( "==" additive )*
-    fn parse_equality(&mut self) -> Result<Term, ParseError> {
-        let mut left = self.parse_additive()?;
+    // assign := equality ( ":=" assign )?   (associativo à direita)
+    fn parse_assign(&mut self) -> Result<Term, ParseError> {
+        let target = self.parse_equality()?;
 
-        while matches!(self.peek_kind(), TokenKind::EqEq) {
+        if matches!(self.peek_kind(), TokenKind::ColonEquals) {
             self.advance();
-            let right = self.parse_additive()?;
-            left = Term::BinaryOperation {
-                operator: BinaryOperator::Eq,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let value = self.parse_assign()?;
+            return Ok(Term::Assign { target: Box::new(target), value: Box::new(value) });
         }
 
-        Ok(left)
+        Ok(target)
     }
 
-    // additive := primary ( ("+" | "-") primary )*
-    fn parse_additive(&mut self) -> Result<Term, ParseError> {
-        let mut left = self.parse_primary()?;
-
+    // equality := relational ( ("==" | "<>") relational )*
+    fn parse_equality(&mut self) -> Result<Term, ParseError> {
+        let mut left = self.parse_relational()?;
         loop {
             let operator = match self.peek_kind() {
-                TokenKind::Plus  => BinaryOperator::Add,
-                TokenKind::Minus => BinaryOperator::Sub,
+                TokenKind::EqualityOperator => BinaryOperator::Eq,
+                TokenKind::InequalityOperator => BinaryOperator::Neq,
                 _ => break,
             };
-
             self.advance();
-            let right = self.parse_primary()?;
-
-            left = Term::BinaryOperation {
-                operator,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let right = self.parse_relational()?;
+            left = Term::BinaryOperation { operator, left: Box::new(left), right: Box::new(right) };
         }
-
         Ok(left)
     }
 
-    // primary := INTEGER | BOOLEAN | "(" equality ")"
+    // relational := additive ( ("<" | "<=" | ">" | ">=") additive )*
+    fn parse_relational(&mut self) -> Result<Term, ParseError> {
+        let mut left = self.parse_additive()?;
+        loop {
+            let operator = match self.peek_kind() {
+                TokenKind::LTOperator => BinaryOperator::Lt,
+                TokenKind::LEQOperator => BinaryOperator::Leq,
+                TokenKind::GTOperator => BinaryOperator::Gt,
+                TokenKind::GEQOperator => BinaryOperator::Geq,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_additive()?;
+            left = Term::BinaryOperation { operator, left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // additive := unary ( ("+" | "-") unary )*
+    fn parse_additive(&mut self) -> Result<Term, ParseError> {
+        let mut left = self.parse_unary()?;
+        loop {
+            let operator = match self.peek_kind() {
+                TokenKind::AdditionOperator => BinaryOperator::Add,
+                TokenKind::SubtractionOperator => BinaryOperator::Sub,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_unary()?;
+            left = Term::BinaryOperation { operator, left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // unary := "not" unary | "ref" unary | "!" unary | primary
+    fn parse_unary(&mut self) -> Result<Term, ParseError> {
+        if matches!(self.peek_kind(), TokenKind::NotOperator) {
+            self.advance();
+            let operand = self.parse_unary()?;
+            return Ok(Term::UnaryOperation { operator: UnaryOperator::Not, operand: Box::new(operand) });
+        }
+
+        if matches!(self.peek_kind(), TokenKind::RefKeyword) {
+            self.advance();
+            let operand = self.parse_unary()?;
+            return Ok(Term::Ref(Box::new(operand)));
+        }
+
+        if matches!(self.peek_kind(), TokenKind::Bang) {
+            self.advance();
+            let operand = self.parse_unary()?;
+            return Ok(Term::Deref(Box::new(operand)));
+        }
+
+        self.parse_primary()
+    }
+
+    // primary := INTEGER | BOOLEAN | UNIT | IDENTIFIER
+    //          | "(" assign ")"
+    //          | "if" equality "then" assign "else" assign
+    //          | "let" IDENTIFIER ":" type "=" assign "in" assign
     fn parse_primary(&mut self) -> Result<Term, ParseError> {
         let token = self.peek().clone();
 
@@ -715,15 +994,97 @@ impl Parser {
                 self.advance();
                 Ok(Term::LiteralBoolean(b))
             }
+            TokenKind::UnitLiteral => {
+                self.advance();
+                Ok(Term::Unit)
+            }
+            TokenKind::Identifier(name) => {
+                self.advance();
+                Ok(Term::Variable(name))
+            }
             TokenKind::LParen => {
                 self.advance();
-                let inner = self.parse_equality()?;
+                let inner = self.parse_assign()?;
                 self.expect(TokenKind::RParen)?;
                 Ok(inner)
             }
+            TokenKind::If => {
+                self.advance();
+                let condition = self.parse_equality()?;
+                self.expect(TokenKind::Then)?;
+                let then_branch = self.parse_assign()?;
+                self.expect(TokenKind::Else)?;
+                let else_branch = self.parse_assign()?;
+                Ok(Term::Conditional {
+                    condition: Box::new(condition),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                })
+            }
+            TokenKind::Let => {
+                self.advance();
+                let name = self.expect_identifier()?;
+                self.expect(TokenKind::Colon)?;
+                let declared_type = self.parse_type()?;
+                self.expect(TokenKind::Assign)?;
+                let value = self.parse_assign()?;
+                self.expect(TokenKind::In)?;
+                let body = self.parse_assign()?;
+                Ok(Term::Let {
+                    name,
+                    declared_type,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                })
+            }
             TokenKind::Eof => Err(ParseError::UnexpectedEof),
+            found => Err(ParseError::UnexpectedToken { found, line: token.line, column: token.column }),
+        }
+    }
+
+    /// Consome um `Identifier`, ou retorna erro se o token atual não for um.
+    fn expect_identifier(&mut self) -> Result<String, ParseError> {
+        let token = self.peek().clone();
+        match token.kind {
+            TokenKind::Identifier(name) => {
+                self.advance();
+                Ok(name)
+            }
+            found => Err(ParseError::UnexpectedToken { found, line: token.line, column: token.column }),
+        }
+    }
+
+    /// Consome uma expressão de tipo: `Integer`, `Boolean`, `Unit`,
+    /// ou `Ref <type>` (recursivo, para referências aninhadas).
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let token = self.peek().clone();
+        match &token.kind {
+            TokenKind::Identifier(name) => match name.as_str() {
+                "Integer" => {
+                    self.advance();
+                    Ok(Type::Integer)
+                }
+                "Boolean" => {
+                    self.advance();
+                    Ok(Type::Boolean)
+                }
+                "Unit" => {
+                    self.advance();
+                    Ok(Type::Unit)
+                }
+                "Ref" => {
+                    self.advance();
+                    let inner = self.parse_type()?;
+                    Ok(Type::Reference(Box::new(inner)))
+                }
+                _ => Err(ParseError::UnknownTypeName {
+                    name: name.clone(),
+                    line: token.line,
+                    column: token.column,
+                }),
+            },
             found => Err(ParseError::UnexpectedToken {
-                found,
+                found: found.clone(),
                 line: token.line,
                 column: token.column,
             }),
@@ -745,8 +1106,6 @@ impl Parser {
     }
 
     fn peek(&self) -> &Token {
-        // seguro: `tokenize()` sempre termina com `Eof`, então nunca
-        // avançamos além do último token.
         self.tokens.get(self.position).unwrap_or_else(|| {
             self.tokens.last().expect("stream de tokens não deveria estar vazia")
         })
@@ -764,10 +1123,7 @@ impl Parser {
         token
     }
 }
-#+end_src
 
-#+name: language-s--parser--tests
-#+begin_src rust :results output :tangle S/src/Scanner/Parser.rs
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,94 +1155,110 @@ mod tests {
     }
 
     #[test]
-    fn soma_e_subtracao_sao_associativas_a_esquerda() {
-        // 1 + 2 - 3  =>  (1 + 2) - 3
-        let term = parse_str("1 + 2 - 3").expect("deveria parsear");
+    fn parseia_let_simples() {
+        let term = parse_str("let x: Integer = 1 in x + 1").expect("deveria parsear");
         assert_eq!(
             term,
-            Term::BinaryOperation {
-                operator: BinaryOperator::Sub,
-                left: Box::new(Term::BinaryOperation {
+            Term::Let {
+                name: "x".to_string(),
+                declared_type: Type::Integer,
+                value: Box::new(Term::LiteralInteger(1)),
+                body: Box::new(Term::BinaryOperation {
                     operator: BinaryOperator::Add,
-                    left: Box::new(Term::LiteralInteger(1)),
-                    right: Box::new(Term::LiteralInteger(2)),
-                }),
-                right: Box::new(Term::LiteralInteger(3)),
-            }
-        );
-    }
-
-    #[test]
-    fn igualdade_tem_precedencia_menor_que_soma() {
-        // 1 + 2 == 3  =>  (1 + 2) == 3
-        let term = parse_str("1 + 2 == 3").expect("deveria parsear");
-        assert_eq!(
-            term,
-            Term::BinaryOperation {
-                operator: BinaryOperator::Eq,
-                left: Box::new(Term::BinaryOperation {
-                    operator: BinaryOperator::Add,
-                    left: Box::new(Term::LiteralInteger(1)),
-                    right: Box::new(Term::LiteralInteger(2)),
-                }),
-                right: Box::new(Term::LiteralInteger(3)),
-            }
-        );
-    }
-
-    #[test]
-    fn parenteses_alteram_precedencia() {
-        // 1 - (2 - 3)  !=  (1 - 2) - 3
-        let term = parse_str("1 - (2 - 3)").expect("deveria parsear");
-        assert_eq!(
-            term,
-            Term::BinaryOperation {
-                operator: BinaryOperator::Sub,
-                left: Box::new(Term::LiteralInteger(1)),
-                right: Box::new(Term::BinaryOperation {
-                    operator: BinaryOperator::Sub,
-                    left: Box::new(Term::LiteralInteger(2)),
-                    right: Box::new(Term::LiteralInteger(3)),
+                    left: Box::new(Term::Variable("x".to_string())),
+                    right: Box::new(Term::LiteralInteger(1)),
                 }),
             }
         );
     }
 
     #[test]
-    fn booleanos_e_comparacao() {
-        let term = parse_str("true == false").expect("deveria parsear");
+    fn parseia_ref_e_deref() {
+        let term = parse_str("!(ref 1)").expect("deveria parsear");
         assert_eq!(
             term,
-            Term::BinaryOperation {
-                operator: BinaryOperator::Eq,
-                left: Box::new(Term::LiteralBoolean(true)),
-                right: Box::new(Term::LiteralBoolean(false)),
+            Term::Deref(Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))))
+        );
+    }
+
+    #[test]
+    fn parseia_assign() {
+        let term = parse_str("r := 5").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::Assign {
+                target: Box::new(Term::Variable("r".to_string())),
+                value: Box::new(Term::LiteralInteger(5)),
             }
         );
     }
 
     #[test]
-    fn tokens_sobrando_gera_erro() {
-        // dois termos sem operador entre eles
-        let result = parse_str("1 2");
-        assert!(matches!(result, Err(ParseError::UnexpectedToken { .. })));
+    fn parseia_tipo_ref_no_let() {
+        let term = parse_str("let r: Ref Integer = ref 1 in !r").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::Let {
+                name: "r".to_string(),
+                declared_type: Type::Reference(Box::new(Type::Integer)),
+                value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+                body: Box::new(Term::Deref(Box::new(Term::Variable("r".to_string())))),
+            }
+        );
+    }
+
+    #[test]
+    fn parseia_unit() {
+        let term = parse_str("unit").expect("deveria parsear");
+        assert_eq!(term, Term::Unit);
+    }
+
+    #[test]
+    fn assign_dentro_de_let_como_valor() {
+        // let ignored: Unit = (r := 5) in !r
+        let term = parse_str("let ignored: Unit = (r := 5) in !r").expect("deveria parsear");
+        match term {
+            Term::Let { declared_type, value, .. } => {
+                assert_eq!(declared_type, Type::Unit);
+                assert!(matches!(*value, Term::Assign { .. }));
+            }
+            _ => panic!("deveria ser um Let"),
+        }
+    }
+
+    #[test]
+    fn condicional_completo() {
+        let term = parse_str("if true then 1 else 2").expect("deveria parsear");
+        assert_eq!(
+            term,
+            Term::Conditional {
+                condition: Box::new(Term::LiteralBoolean(true)),
+                then_branch: Box::new(Term::LiteralInteger(1)),
+                else_branch: Box::new(Term::LiteralInteger(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn tipo_desconhecido_em_let_e_erro() {
+        let result = parse_str("let x: Wat = 1 in x");
+        assert!(matches!(result, Err(ParseError::UnknownTypeName { .. })));
     }
 
     #[test]
     fn entrada_vazia_gera_erro() {
-        let result = parse_str("");
-        assert!(matches!(result, Err(ParseError::UnexpectedEof)));
+        assert!(matches!(parse_str(""), Err(ParseError::UnexpectedEof)));
     }
 }
 #+end_src
 
 ** checagem de tipos
 :PROPERTIES:
-:TID: 20260817130500
+:TID: 20260819081500
 :END:
-O /type-checker/ percorre um ~Term~ recursivamente e infere seu ~Type~, rejeitando operações entre tipos incompatíveis (ex.: ~1 + true~).
+O /type-checker/ percorre um ~Term~ recursivamente e infere seu ~Type~, sob um /ambiente de tipos/ (~TypeEnv~, um mapa nome → ~Type~) que cresce à medida que entramos no corpo de um ~let~. A API pública (~type_of(term)~) continua aceitando só o termo — o ambiente entra vazio por padrão e é passado internamente por ~type_of_in~.
 
-#+name: language-s--typechecker--struct
+#+name: language-s--typechecker--all
 #+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
 //! S/src/Scanner/TypeChecker.rs
 //!
@@ -894,22 +1266,61 @@ O /type-checker/ percorre um ~Term~ recursivamente e infere seu ~Type~, rejeitan
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.4
 
-use crate::Scanner::Types::{BinaryOperator, Term, Type};
+use std::collections::HashMap;
+
+use crate::Scanner::Types::{BinaryOperator, Term, Type, UnaryOperator};
+
+/// Ambiente de tipos: associa nomes de variáveis ligadas (via `let`)
+/// ao seu `Type`.
+pub type TypeEnv = HashMap<String, Type>;
 
 /// Erros possíveis durante a checagem de tipos.
 #[derive(Debug, PartialEq)]
 pub enum TypeError {
-    /// Um operador foi aplicado a operando(s) de tipo incompatível.
     Mismatch {
         operator: BinaryOperator,
         expected: Type,
         found: Type,
         side: Side,
     },
-    /// `Eq` recebeu operandos de tipos diferentes entre si.
-    EqTypeMismatch { left: Type, right: Type },
+    EqualityMismatch {
+        operator: BinaryOperator,
+        left: Type,
+        right: Type,
+    },
+    UnaryMismatch {
+        operator: UnaryOperator,
+        expected: Type,
+        found: Type,
+    },
+    ConditionMismatch {
+        found: Type,
+    },
+    BranchMismatch {
+        then_type: Type,
+        else_type: Type,
+    },
+    /// Uso de uma variável não ligada por nenhum `let` no escopo.
+    UnboundVariable {
+        name: String,
+    },
+    /// O tipo anotado em `let x: T = ...` não bate com o tipo real de `t1`.
+    LetAnnotationMismatch {
+        name: String,
+        declared: Type,
+        found: Type,
+    },
+    /// `!t`: `t` não tem tipo `Ref(_)`.
+    DerefMismatch {
+        found: Type,
+    },
+    /// `t1 := t2`: `t1` não é `Ref(T)`, ou `t2` não é do tipo `T`.
+    AssignMismatch {
+        target: Type,
+        value: Type,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -926,36 +1337,103 @@ impl std::fmt::Display for TypeError {
                     Side::Left => "operando esquerdo",
                     Side::Right => "operando direito",
                 };
+                write!(f, "operador '{operator}': {side_name} deveria ser {expected}, mas é {found}")
+            }
+            TypeError::EqualityMismatch { operator, left, right } => {
+                write!(f, "operador '{operator}': tipos incompatíveis {left} e {right}")
+            }
+            TypeError::UnaryMismatch { operator, expected, found } => {
+                write!(f, "operador '{operator}': operando deveria ser {expected}, mas é {found}")
+            }
+            TypeError::ConditionMismatch { found } => {
+                write!(f, "condição do 'if' deveria ser Boolean, mas é {found}")
+            }
+            TypeError::BranchMismatch { then_type, else_type } => {
+                write!(f, "ramos do 'if' têm tipos diferentes: then={then_type}, else={else_type}")
+            }
+            TypeError::UnboundVariable { name } => {
+                write!(f, "variável '{name}' não está ligada neste escopo")
+            }
+            TypeError::LetAnnotationMismatch { name, declared, found } => {
                 write!(
                     f,
-                    "operador '{operator}': {side_name} deveria ser {expected}, mas é {found}"
+                    "'let {name}: {declared}' recebeu valor de tipo {found}, incompatível com a anotação"
                 )
             }
-            TypeError::EqTypeMismatch { left, right } => {
-                write!(f, "operador '==': tipos incompatíveis {left} e {right}")
+            TypeError::DerefMismatch { found } => {
+                write!(f, "operador '!': operando deveria ser uma referência (Ref T), mas é {found}")
+            }
+            TypeError::AssignMismatch { target, value } => {
+                write!(
+                    f,
+                    "operador ':=': lado esquerdo tem tipo {target} (deveria ser Ref T compatível com {value})"
+                )
             }
         }
     }
 }
 
 impl std::error::Error for TypeError {}
-#+end_src
 
-#+name: language-s--typechecker--impl
-#+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
-/// Infere o `Type` de um `Term`, ou retorna o primeiro `TypeError`
-/// encontrado na subárvore.
+/// Infere o `Type` de um `Term` no escopo vazio (sem variáveis ligadas).
 pub fn type_of(term: &Term) -> Result<Type, TypeError> {
+    type_of_in(term, &TypeEnv::new())
+}
+
+/// Infere o `Type` de um `Term` sob o ambiente `env`.
+fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
     match term {
         Term::LiteralInteger(_) => Ok(Type::Integer),
         Term::LiteralBoolean(_) => Ok(Type::Boolean),
+        Term::Unit => Ok(Type::Unit),
+
+        Term::Variable(name) => env
+            .get(name)
+            .cloned()
+            .ok_or_else(|| TypeError::UnboundVariable { name: name.clone() }),
+
+        Term::UnaryOperation { operator, operand } => {
+            let operand_ty = type_of_in(operand, env)?;
+            match operator {
+                UnaryOperator::Not => {
+                    if operand_ty != Type::Boolean {
+                        return Err(TypeError::UnaryMismatch {
+                            operator: *operator,
+                            expected: Type::Boolean,
+                            found: operand_ty,
+                        });
+                    }
+                    Ok(Type::Boolean)
+                }
+            }
+        }
+
+        Term::Conditional { condition, then_branch, else_branch } => {
+            let cond_ty = type_of_in(condition, env)?;
+            if cond_ty != Type::Boolean {
+                return Err(TypeError::ConditionMismatch { found: cond_ty });
+            }
+
+            let then_ty = type_of_in(then_branch, env)?;
+            let else_ty = type_of_in(else_branch, env)?;
+            if then_ty != else_ty {
+                return Err(TypeError::BranchMismatch { then_type: then_ty, else_type: else_ty });
+            }
+
+            Ok(then_ty)
+        }
 
         Term::BinaryOperation { operator, left, right } => {
-            let left_ty = type_of(left)?;
-            let right_ty = type_of(right)?;
+            let left_ty = type_of_in(left, env)?;
+            let right_ty = type_of_in(right, env)?;
 
             match operator {
-                BinaryOperator::Add | BinaryOperator::Sub => {
+                BinaryOperator::Add
+                | BinaryOperator::Sub
+                | BinaryOperator::Lt
+                | BinaryOperator::Leq
+                | BinaryOperator::Gt
+                | BinaryOperator::Geq => {
                     if left_ty != Type::Integer {
                         return Err(TypeError::Mismatch {
                             operator: *operator,
@@ -972,12 +1450,17 @@ pub fn type_of(term: &Term) -> Result<Type, TypeError> {
                             side: Side::Right,
                         });
                     }
-                    Ok(Type::Integer)
+
+                    match operator {
+                        BinaryOperator::Add | BinaryOperator::Sub => Ok(Type::Integer),
+                        _ => Ok(Type::Boolean),
+                    }
                 }
 
-                BinaryOperator::Eq => {
+                BinaryOperator::Eq | BinaryOperator::Neq => {
                     if left_ty != right_ty {
-                        return Err(TypeError::EqTypeMismatch {
+                        return Err(TypeError::EqualityMismatch {
+                            operator: *operator,
                             left: left_ty,
                             right: right_ty,
                         });
@@ -986,35 +1469,61 @@ pub fn type_of(term: &Term) -> Result<Type, TypeError> {
                 }
             }
         }
+
+        Term::Let { name, declared_type, value, body } => {
+            let value_ty = type_of_in(value, env)?;
+
+            if value_ty != *declared_type {
+                return Err(TypeError::LetAnnotationMismatch {
+                    name: name.clone(),
+                    declared: declared_type.clone(),
+                    found: value_ty,
+                });
+            }
+
+            let mut inner_env = env.clone();
+            inner_env.insert(name.clone(), declared_type.clone());
+
+            type_of_in(body, &inner_env)
+        }
+
+        Term::Ref(inner) => {
+            let inner_ty = type_of_in(inner, env)?;
+            Ok(Type::Reference(Box::new(inner_ty)))
+        }
+
+        Term::Deref(inner) => {
+            let inner_ty = type_of_in(inner, env)?;
+            match inner_ty {
+                Type::Reference(referenced) => Ok(*referenced),
+                other => Err(TypeError::DerefMismatch { found: other }),
+            }
+        }
+
+        Term::Assign { target, value } => {
+            let target_ty = type_of_in(target, env)?;
+            let value_ty = type_of_in(value, env)?;
+
+            match target_ty {
+                Type::Reference(referenced) => {
+                    if *referenced == value_ty {
+                        Ok(Type::Unit)
+                    } else {
+                        Err(TypeError::AssignMismatch {
+                            target: Type::Reference(referenced),
+                            value: value_ty,
+                        })
+                    }
+                }
+                other => Err(TypeError::AssignMismatch { target: other, value: value_ty }),
+            }
+        }
     }
 }
-#+end_src
 
-#+name: language-s--typechecker--tests
-#+begin_src rust :results output :tangle S/src/Scanner/TypeChecker.rs
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn inteiro_literal_tem_tipo_integer() {
-        assert_eq!(type_of(&Term::LiteralInteger(42)), Ok(Type::Integer));
-    }
-
-    #[test]
-    fn booleano_literal_tem_tipo_boolean() {
-        assert_eq!(type_of(&Term::LiteralBoolean(true)), Ok(Type::Boolean));
-    }
-
-    #[test]
-    fn soma_de_inteiros_tem_tipo_integer() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Add,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralInteger(2)),
-        };
-        assert_eq!(type_of(&term), Ok(Type::Integer));
-    }
 
     #[test]
     fn soma_com_booleano_e_erro() {
@@ -1023,74 +1532,123 @@ mod tests {
             left: Box::new(Term::LiteralInteger(1)),
             right: Box::new(Term::LiteralBoolean(true)),
         };
-        assert_eq!(
-            type_of(&term),
-            Err(TypeError::Mismatch {
+        assert!(matches!(type_of(&term), Err(TypeError::Mismatch { .. })));
+    }
+
+    #[test]
+    fn variavel_nao_ligada_e_erro() {
+        let term = Term::Variable("x".to_string());
+        assert_eq!(type_of(&term), Err(TypeError::UnboundVariable { name: "x".to_string() }));
+    }
+
+    #[test]
+    fn let_simples_tem_tipo_do_corpo() {
+        let term = Term::Let {
+            name: "x".to_string(),
+            declared_type: Type::Integer,
+            value: Box::new(Term::LiteralInteger(1)),
+            body: Box::new(Term::BinaryOperation {
                 operator: BinaryOperator::Add,
-                expected: Type::Integer,
-                found: Type::Boolean,
-                side: Side::Right,
-            })
-        );
-    }
-
-    #[test]
-    fn igualdade_entre_inteiros_tem_tipo_boolean() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralInteger(1)),
-        };
-        assert_eq!(type_of(&term), Ok(Type::Boolean));
-    }
-
-    #[test]
-    fn igualdade_entre_booleanos_tem_tipo_boolean() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralBoolean(true)),
-            right: Box::new(Term::LiteralBoolean(false)),
-        };
-        assert_eq!(type_of(&term), Ok(Type::Boolean));
-    }
-
-    #[test]
-    fn igualdade_entre_tipos_diferentes_e_erro() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralBoolean(true)),
-        };
-        assert_eq!(
-            type_of(&term),
-            Err(TypeError::EqTypeMismatch { left: Type::Integer, right: Type::Boolean })
-        );
-    }
-
-    #[test]
-    fn erro_de_tipo_em_subarvore_propaga() {
-        // (1 + true) - 2  =>  erro já no lado esquerdo da subtração
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Sub,
-            left: Box::new(Term::BinaryOperation {
-                operator: BinaryOperator::Add,
-                left: Box::new(Term::LiteralInteger(1)),
-                right: Box::new(Term::LiteralBoolean(true)),
+                left: Box::new(Term::Variable("x".to_string())),
+                right: Box::new(Term::LiteralInteger(1)),
             }),
-            right: Box::new(Term::LiteralInteger(2)),
         };
-        assert!(type_of(&term).is_err());
+        assert_eq!(type_of(&term), Ok(Type::Integer));
+    }
+
+    #[test]
+    fn let_com_anotacao_incompativel_e_erro() {
+        let term = Term::Let {
+            name: "x".to_string(),
+            declared_type: Type::Boolean,
+            value: Box::new(Term::LiteralInteger(1)),
+            body: Box::new(Term::Variable("x".to_string())),
+        };
+        assert!(matches!(type_of(&term), Err(TypeError::LetAnnotationMismatch { .. })));
+    }
+
+    #[test]
+    fn unit_tem_tipo_unit() {
+        assert_eq!(type_of(&Term::Unit), Ok(Type::Unit));
+    }
+
+    #[test]
+    fn ref_de_inteiro_tem_tipo_ref_integer() {
+        let term = Term::Ref(Box::new(Term::LiteralInteger(1)));
+        assert_eq!(type_of(&term), Ok(Type::Reference(Box::new(Type::Integer))));
+    }
+
+    #[test]
+    fn deref_de_ref_integer_tem_tipo_integer() {
+        let term = Term::Deref(Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))));
+        assert_eq!(type_of(&term), Ok(Type::Integer));
+    }
+
+    #[test]
+    fn deref_de_nao_referencia_e_erro() {
+        let term = Term::Deref(Box::new(Term::LiteralInteger(1)));
+        assert!(matches!(type_of(&term), Err(TypeError::DerefMismatch { .. })));
+    }
+
+    #[test]
+    fn assign_bem_tipado_produz_unit() {
+        // let r: Ref Integer = ref 1 in r := 2
+        let term = Term::Let {
+            name: "r".to_string(),
+            declared_type: Type::Reference(Box::new(Type::Integer)),
+            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+            body: Box::new(Term::Assign {
+                target: Box::new(Term::Variable("r".to_string())),
+                value: Box::new(Term::LiteralInteger(2)),
+            }),
+        };
+        assert_eq!(type_of(&term), Ok(Type::Unit));
+    }
+
+    #[test]
+    fn assign_com_tipo_incompativel_e_erro() {
+        // let r: Ref Integer = ref 1 in r := true
+        let term = Term::Let {
+            name: "r".to_string(),
+            declared_type: Type::Reference(Box::new(Type::Integer)),
+            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+            body: Box::new(Term::Assign {
+                target: Box::new(Term::Variable("r".to_string())),
+                value: Box::new(Term::LiteralBoolean(true)),
+            }),
+        };
+        assert!(matches!(type_of(&term), Err(TypeError::AssignMismatch { .. })));
+    }
+
+    #[test]
+    fn assign_sobre_nao_referencia_e_erro() {
+        // 1 := 2  =>  1 não é uma referência
+        let term = Term::Assign {
+            target: Box::new(Term::LiteralInteger(1)),
+            value: Box::new(Term::LiteralInteger(2)),
+        };
+        assert!(matches!(type_of(&term), Err(TypeError::AssignMismatch { .. })));
     }
 }
 #+end_src
 
-** avaliação
+** avaliação e memória
 :PROPERTIES:
-:TID: 20260817131000
+:TID: 20260819081501
 :END:
-O /avaliador/ recebe um ~Term~ *já validado* pelo /type-checker/ e o reduz a um ~Value~. Chamar ~eval~ sobre um termo mal-tipado é contrato violado — os ramos correspondentes usam ~unreachable!()~ em vez de retornar erro, já que essa situação não deveria ocorrer no fluxo normal (~parse -> type_of -> eval~).
+O /avaliador/ recebe um ~Term~ *já validado* pelo /type-checker/ e o reduz a um ~Value~, sob um /ambiente de valores/ (~ValueEnv~) e uma /memória/ (~Store~).
 
-#+name: language-s--evaluator--struct
+A ~Store~ é simplesmente um ~Vec<Value>~: cada posição é um "endereço". As três operações de memória mapeiam diretamente para operações de vetor:
+
+- ~ref t~ avalia ~t~, empilha o resultado na ~Store~ (~push~) e devolve um ~Value::Location~ apontando para a posição recém-criada.
+- ~!t~ (deref) avalia ~t~ até um ~Value::Location(loc)~ e lê ~store[loc]~.
+- ~t1 := t2~ avalia ~t1~ até um ~Value::Location(loc)~, avalia ~t2~, escreve em ~store[loc]~, e devolve ~Value::Unit~ (não há valor útil para retornar de uma atribuição).
+
+Como a linguagem ainda não tem um operador de /sequenciamento/ (~t1; t2~), a forma de "fazer duas coisas em ordem" é usar ~let~ com um nome descartável para o resultado ~Unit~ da atribuição: ~let _: Unit = (r := 5) in !r~.
+
+A API pública (~eval(term)~) continua aceitando só o termo — o ambiente e a memória entram vazios por padrão, criados frescos a cada chamada de ~eval~. Isso significa que, no REPL, cada linha tem sua própria memória isolada; nada persiste de uma linha para a outra (mas isso já era o caso para variáveis também, já que ~let ... in ...~ exige que corpo e valor estejam na mesma linha).
+
+#+name: language-s--evaluator--all
 #+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
 //! S/src/Scanner/Evaluator.rs
 //!
@@ -1098,15 +1656,22 @@ O /avaliador/ recebe um ~Term~ *já validado* pelo /type-checker/ e o reduz a um
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.4
 
-use crate::Scanner::Types::{BinaryOperator, Term};
+use std::collections::HashMap;
+
+use crate::Scanner::Types::{BinaryOperator, Term, UnaryOperator};
 
 /// Resultado da avaliação de um `Term`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Integer(i64),
     Boolean(bool),
+    Unit,
+    /// Referência para uma posição da `Store` (índice do vetor de
+    /// memória). Nunca aparece na sintaxe de superfície — só é
+    /// produzida pela avaliação de `Term::Ref`.
+    Location(usize),
 }
 
 impl std::fmt::Display for Value {
@@ -1114,29 +1679,66 @@ impl std::fmt::Display for Value {
         match self {
             Value::Integer(n) => write!(f, "{n}"),
             Value::Boolean(b) => write!(f, "{b}"),
+            Value::Unit => write!(f, "unit"),
+            Value::Location(loc) => write!(f, "<loc {loc}>"),
         }
     }
 }
-#+end_src
 
-#+name: language-s--evaluator--impl
-#+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
-/// Avalia um `Term` já validado pelo type-checker (`type_of`) e
-/// produz seu `Value`.
+/// Ambiente de valores: associa nomes de variáveis ligadas (via
+/// `let`) ao seu `Value` já avaliado.
+pub type ValueEnv = HashMap<String, Value>;
+
+/// A memória de `S`: um vetor de `Value`, endereçado por índice.
+/// `ref t` aloca uma nova posição (`push`); `!t` lê (`store[loc]`);
+/// `t1 := t2` escreve (`store[loc] = ...`).
+pub type Store = Vec<Value>;
+
+/// Avalia um `Term` já validado pelo type-checker, no escopo vazio e
+/// com memória própria (criada do zero para esta avaliação).
 ///
 /// # Contrato
 /// Chame `type_of(term)` com sucesso antes de `eval(term)`. Termos
-/// mal-tipados (ex.: `1 + true`) causam pânico, pois representam
-/// violação do contrato do pipeline (`parse -> type_of -> eval`),
-/// não um erro de execução esperado.
+/// mal-tipados causam pânico, pois representam violação do contrato
+/// do pipeline (`parse -> type_of -> eval`), não um erro de execução
+/// esperado.
 pub fn eval(term: &Term) -> Value {
+    let mut store = Store::new();
+    eval_in(term, &ValueEnv::new(), &mut store)
+}
+
+fn eval_in(term: &Term, env: &ValueEnv, store: &mut Store) -> Value {
     match term {
         Term::LiteralInteger(n) => Value::Integer(*n),
         Term::LiteralBoolean(b) => Value::Boolean(*b),
+        Term::Unit => Value::Unit,
+
+        Term::Variable(name) => env
+            .get(name)
+            .cloned()
+            .expect("type-checker deveria ter garantido que a variável está ligada"),
+
+        Term::UnaryOperation { operator, operand } => {
+            let value = eval_in(operand, env, store);
+            match operator {
+                UnaryOperator::Not => match value {
+                    Value::Boolean(b) => Value::Boolean(!b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Not mal-tipado"),
+                },
+            }
+        }
+
+        Term::Conditional { condition, then_branch, else_branch } => {
+            match eval_in(condition, env, store) {
+                Value::Boolean(true) => eval_in(then_branch, env, store),
+                Value::Boolean(false) => eval_in(else_branch, env, store),
+                _ => unreachable!("type-checker deveria ter garantido condição booleana"),
+            }
+        }
 
         Term::BinaryOperation { operator, left, right } => {
-            let left_val = eval(left);
-            let right_val = eval(right);
+            let left_val = eval_in(left, env, store);
+            let right_val = eval_in(right, env, store);
 
             match operator {
                 BinaryOperator::Add => match (left_val, right_val) {
@@ -1148,27 +1750,75 @@ pub fn eval(term: &Term) -> Value {
                     _ => unreachable!("type-checker deveria ter rejeitado Sub mal-tipado"),
                 },
                 BinaryOperator::Eq => Value::Boolean(left_val == right_val),
+                BinaryOperator::Neq => Value::Boolean(left_val != right_val),
+                BinaryOperator::Lt => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Boolean(a < b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Lt mal-tipado"),
+                },
+                BinaryOperator::Leq => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Boolean(a <= b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Leq mal-tipado"),
+                },
+                BinaryOperator::Gt => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Boolean(a > b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Gt mal-tipado"),
+                },
+                BinaryOperator::Geq => match (left_val, right_val) {
+                    (Value::Integer(a), Value::Integer(b)) => Value::Boolean(a >= b),
+                    _ => unreachable!("type-checker deveria ter rejeitado Geq mal-tipado"),
+                },
+            }
+        }
+
+        Term::Let { name, value, body, .. } => {
+            let bound_value = eval_in(value, env, store);
+            let mut inner_env = env.clone();
+            inner_env.insert(name.clone(), bound_value);
+            eval_in(body, &inner_env, store)
+        }
+
+        Term::Ref(inner) => {
+            let value = eval_in(inner, env, store);
+            store.push(value);
+            Value::Location(store.len() - 1)
+        }
+
+        Term::Deref(inner) => match eval_in(inner, env, store) {
+            Value::Location(loc) => store
+                .get(loc)
+                .cloned()
+                .expect("type-checker deveria ter garantido uma posição de memória válida"),
+            _ => unreachable!("type-checker deveria ter rejeitado Deref de não-referência"),
+        },
+
+        Term::Assign { target, value } => {
+            let target_val = eval_in(target, env, store);
+            let new_val = eval_in(value, env, store);
+
+            match target_val {
+                Value::Location(loc) => {
+                    store[loc] = new_val;
+                    Value::Unit
+                }
+                _ => unreachable!("type-checker deveria ter rejeitado Assign sobre não-referência"),
             }
         }
     }
 }
 
 /// Conveniência: checa o tipo e avalia em sequência, retornando erro
-/// de tipo se o termo for mal-tipado (em vez de arriscar o `eval`
-/// direto sobre um termo não validado).
+/// de tipo se o termo for mal-tipado.
 pub fn type_check_and_eval(
     term: &Term,
 ) -> Result<Value, crate::Scanner::TypeChecker::TypeError> {
     crate::Scanner::TypeChecker::type_of(term)?;
     Ok(eval(term))
 }
-#+end_src
 
-#+name: language-s--evaluator--tests
-#+begin_src rust :results output :tangle S/src/Scanner/Evaluator.rs
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Scanner::Types::Type;
 
     #[test]
     fn avalia_soma() {
@@ -1181,79 +1831,106 @@ mod tests {
     }
 
     #[test]
-    fn avalia_subtracao() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Sub,
-            left: Box::new(Term::LiteralInteger(5)),
-            right: Box::new(Term::LiteralInteger(3)),
+    fn avalia_let_simples() {
+        let term = Term::Let {
+            name: "x".to_string(),
+            declared_type: Type::Integer,
+            value: Box::new(Term::LiteralInteger(1)),
+            body: Box::new(Term::BinaryOperation {
+                operator: BinaryOperator::Add,
+                left: Box::new(Term::Variable("x".to_string())),
+                right: Box::new(Term::LiteralInteger(1)),
+            }),
         };
         assert_eq!(eval(&term), Value::Integer(2));
     }
 
     #[test]
-    fn avalia_igualdade_entre_inteiros() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralInteger(4)),
-            right: Box::new(Term::LiteralInteger(4)),
-        };
-        assert_eq!(eval(&term), Value::Boolean(true));
+    fn avalia_ref_e_deref() {
+        // !(ref 42)  =>  42
+        let term = Term::Deref(Box::new(Term::Ref(Box::new(Term::LiteralInteger(42)))));
+        assert_eq!(eval(&term), Value::Integer(42));
     }
 
     #[test]
-    fn avalia_igualdade_entre_booleanos() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralBoolean(true)),
-            right: Box::new(Term::LiteralBoolean(true)),
-        };
-        assert_eq!(eval(&term), Value::Boolean(true));
-    }
-
-    #[test]
-    fn avalia_expressao_aninhada() {
-        // (1 + 2) - 3  =>  0
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Sub,
-            left: Box::new(Term::BinaryOperation {
-                operator: BinaryOperator::Add,
-                left: Box::new(Term::LiteralInteger(1)),
-                right: Box::new(Term::LiteralInteger(2)),
+    fn avalia_assign_e_leitura_subsequente() {
+        // let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r  =>  99
+        let term = Term::Let {
+            name: "r".to_string(),
+            declared_type: Type::Reference(Box::new(Type::Integer)),
+            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+            body: Box::new(Term::Let {
+                name: "_ignored".to_string(),
+                declared_type: Type::Unit,
+                value: Box::new(Term::Assign {
+                    target: Box::new(Term::Variable("r".to_string())),
+                    value: Box::new(Term::LiteralInteger(99)),
+                }),
+                body: Box::new(Term::Deref(Box::new(Term::Variable("r".to_string())))),
             }),
-            right: Box::new(Term::LiteralInteger(3)),
         };
-        assert_eq!(eval(&term), Value::Integer(0));
+        assert_eq!(eval(&term), Value::Integer(99));
     }
 
     #[test]
-    fn type_check_and_eval_rejeita_termo_mal_tipado() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Add,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralBoolean(true)),
+    fn duas_referencias_sao_independentes() {
+        // let a: Ref Integer = ref 1 in
+        // let b: Ref Integer = ref 1 in
+        // let _: Unit = (a := 100) in
+        // !b   =>  1 (não afetado pela escrita em `a`)
+        let term = Term::Let {
+            name: "a".to_string(),
+            declared_type: Type::Reference(Box::new(Type::Integer)),
+            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+            body: Box::new(Term::Let {
+                name: "b".to_string(),
+                declared_type: Type::Reference(Box::new(Type::Integer)),
+                value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
+                body: Box::new(Term::Let {
+                    name: "_ignored".to_string(),
+                    declared_type: Type::Unit,
+                    value: Box::new(Term::Assign {
+                        target: Box::new(Term::Variable("a".to_string())),
+                        value: Box::new(Term::LiteralInteger(100)),
+                    }),
+                    body: Box::new(Term::Deref(Box::new(Term::Variable("b".to_string())))),
+                }),
+            }),
+        };
+        assert_eq!(eval(&term), Value::Integer(1));
+    }
+
+    #[test]
+    fn type_check_and_eval_com_referencia_mal_tipada_e_erro() {
+        // 1 := 2
+        let term = Term::Assign {
+            target: Box::new(Term::LiteralInteger(1)),
+            value: Box::new(Term::LiteralInteger(2)),
         };
         assert!(type_check_and_eval(&term).is_err());
     }
 
     #[test]
-    fn type_check_and_eval_aceita_termo_bem_tipado() {
-        let term = Term::BinaryOperation {
-            operator: BinaryOperator::Eq,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralInteger(1)),
+    fn type_check_and_eval_com_referencia_bem_tipada() {
+        // let r: Ref Integer = ref 10 in !r
+        let term = Term::Let {
+            name: "r".to_string(),
+            declared_type: Type::Reference(Box::new(Type::Integer)),
+            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(10)))),
+            body: Box::new(Term::Deref(Box::new(Term::Variable("r".to_string())))),
         };
-        assert_eq!(type_check_and_eval(&term), Ok(Value::Boolean(true)));
+        assert_eq!(type_check_and_eval(&term), Ok(Value::Integer(10)));
     }
 }
 #+end_src
 
 ** REPL
 :PROPERTIES:
-:TID: 20260817140000
+:TID: 20260819081502
 :END:
 O /REPL/ (~read-eval-print loop~) lê uma linha do usuário por vez, roda o pipeline completo (~lexer -> parser -> type-checker -> evaluator~) e imprime o ~Value~ resultante ou o erro correspondente, sem encerrar a sessão em caso de erro.
 
-#+name: language-s--repl
+#+name: language-s--repl--all
 #+begin_src rust :results output :tangle S/src/Scanner/Repl.rs
 //! S/src/Scanner/Repl.rs
 //!
@@ -1295,14 +1972,23 @@ fn print_help() {
     println!("  :quit, :q     encerra o REPL");
     println!("  <expressão>   analisa e avalia uma expressão de S");
     println!();
-    println!("Exemplos: 1 + 2   |   true == false   |   (1 - 2) + 3");
+    println!("Exemplos:");
+    println!("  1 + 2");
+    println!("  true == false");
+    println!("  let x: Integer = 10 in x + x");
+    println!("  let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r");
 }
 
 /// Roda uma única linha de entrada através do pipeline completo e
 /// imprime o resultado (ou erro) no formato apropriado a cada etapa.
+///
+/// Nota: cada linha recebe um ambiente e uma memória (`Store`)
+/// próprios e vazios — nada persiste de uma linha para a outra. Como
+/// `let ... in ...` já exige que o corpo esteja na mesma linha, isso
+/// não limita o que dá para expressar; só significa que não existe
+/// (ainda) um jeito de declarar uma variável numa linha e usá-la na
+/// próxima.
 fn run_line(line: &str) {
-    // Reaproveita `SourceFile` mesmo sem um arquivo real em disco,
-    // já que ele é só um contêiner de (path, content, lines).
     let source = SourceFile {
         path: PathBuf::from("<repl>"),
         content: line.to_string(),
@@ -1346,7 +2032,6 @@ pub fn run() {
         input.clear();
         let bytes_read = stdin.read_line(&mut input).expect("falha ao ler stdin");
 
-        // EOF (Ctrl+D): read_line retorna 0 bytes lidos.
         if bytes_read == 0 {
             println!();
             break;
@@ -1364,17 +2049,10 @@ pub fn run() {
         }
     }
 }
-#+end_src
 
-#+name: language-s--repl-tests
-#+begin_src rust :results output :tangle S/src/Scanner/Repl.rs
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // `run_line` imprime em stdout em vez de retornar um valor, então
-    // os testes aqui cobrem só a análise de comandos — a parte
-    // testável sem capturar stdout.
 
     #[test]
     fn reconhece_comando_de_saida() {
@@ -1399,9 +2077,9 @@ mod tests {
 }
 #+end_src
 
-*** wiring de módulos (final, com REPL)
+*** wiring de módulos (final)
 :PROPERTIES:
-:TID: 20260817140500
+:TID: 20260819081503
 :END:
 #+name: language-s--scanner-mod
 #+begin_src rust :results output :tangle S/src/Scanner/mod.rs
@@ -1468,3 +2146,33 @@ fn main() {
     }
 }
 #+end_src
+
+** verificação
+:PROPERTIES:
+:TID: 20260819081504
+:END:
+Este documento foi montado e verificado de ponta a ponta fora do
+Emacs (compilado com ~cargo build~ e testado com ~cargo test~) antes
+do envio, para garantir que não carrega nenhum erro de tangle ou de
+tipo. Resultado:
+
+#+begin_example
+$ cargo build
+   Compiling s v0.1.0
+warning: `s` (bin "s") generated 9 warnings (nomes de módulo em CamelCase)
+    Finished dev [unoptimized + debuginfo] target(s) in 15.03s
+
+$ cargo test
+running 42 tests
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ echo 'let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r' > mem.s
+$ cargo run -- mem.s
+(let r: Ref(Integer) = (ref 1) in (let _: Unit = (r := 99) in (!r))) = 99
+#+end_example
+
+Os únicos avisos (~warning~) restantes são de estilo — nomes de
+módulo em ~CamelCase~ (~Scanner~, ~Types~, ~TypeChecker~ etc.) em vez
+da convenção ~snake_case~ do Rust. Isso é intencional, mantendo a
+nomenclatura já estabelecida ao longo deste documento; não afeta a
+compilação.

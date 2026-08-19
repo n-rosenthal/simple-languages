@@ -38,14 +38,23 @@ fn print_help() {
     println!("  :quit, :q     encerra o REPL");
     println!("  <expressão>   analisa e avalia uma expressão de S");
     println!();
-    println!("Exemplos: 1 + 2   |   true == false   |   (1 - 2) + 3");
+    println!("Exemplos:");
+    println!("  1 + 2");
+    println!("  true == false");
+    println!("  let x: Integer = 10 in x + x");
+    println!("  let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r");
 }
 
 /// Roda uma única linha de entrada através do pipeline completo e
 /// imprime o resultado (ou erro) no formato apropriado a cada etapa.
+///
+/// Nota: cada linha recebe um ambiente e uma memória (`Store`)
+/// próprios e vazios — nada persiste de uma linha para a outra. Como
+/// `let ... in ...` já exige que o corpo esteja na mesma linha, isso
+/// não limita o que dá para expressar; só significa que não existe
+/// (ainda) um jeito de declarar uma variável numa linha e usá-la na
+/// próxima.
 fn run_line(line: &str) {
-    // Reaproveita `SourceFile` mesmo sem um arquivo real em disco,
-    // já que ele é só um contêiner de (path, content, lines).
     let source = SourceFile {
         path: PathBuf::from("<repl>"),
         content: line.to_string(),
@@ -89,7 +98,6 @@ pub fn run() {
         input.clear();
         let bytes_read = stdin.read_line(&mut input).expect("falha ao ler stdin");
 
-        // EOF (Ctrl+D): read_line retorna 0 bytes lidos.
         if bytes_read == 0 {
             println!();
             break;
@@ -111,10 +119,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // `run_line` imprime em stdout em vez de retornar um valor, então
-    // os testes aqui cobrem só a análise de comandos — a parte
-    // testável sem capturar stdout.
 
     #[test]
     fn reconhece_comando_de_saida() {
