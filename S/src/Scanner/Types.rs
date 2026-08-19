@@ -5,7 +5,7 @@
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.4
+//! version: 0.5 (with Span and Sequence)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,6 +58,25 @@ impl SourceFile {
     /// Retorna a linha de índice `n` (0-indexado), se existir.
     pub fn line(&self, n: usize) -> Option<&str> {
         self.lines.get(n).map(String::as_str)
+    }
+}
+
+/// Span de localização (linha/coluna, 1-indexado)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Span {
+    pub fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
+    }
+}
+
+impl std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
     }
 }
 
@@ -133,77 +152,102 @@ impl std::fmt::Display for UnaryOperator {
     }
 }
 
-/// Um termo da linguagem `S`, conforme a gramática:
-///
-/// ```text
-/// term := LiteralInteger   n
-///      |  LiteralBoolean   b
-///      |  Unit
-///      |  Variable         name
-///      |  BinaryOperation  BinaryOperator, term, term
-///      |  UnaryOperation   UnaryOperator, term
-///      |  Conditional      term, term, term
-///      |  Let               name, type, term, term
-///      |  Ref               term            (* aloca memória *)
-///      |  Deref             term            (* !t, lê memória *)
-///      |  Assign            term, term      (* t := t, escreve memória *)
-/// ```
+/// Um termo da linguagem `S`, conforme a gramática.
+/// Todas as variantes agora carregam um `Span` para localização precisa.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Term {
-    LiteralInteger(i64),
-    LiteralBoolean(bool),
-    Unit,
-    Variable(String),
+    LiteralInteger { value: i64, span: Span },
+    LiteralBoolean { value: bool, span: Span },
+    Unit { span: Span },
+    Variable { name: String, span: Span },
     BinaryOperation {
         operator: BinaryOperator,
         left: Box<Term>,
         right: Box<Term>,
+        span: Span,
     },
     UnaryOperation {
         operator: UnaryOperator,
         operand: Box<Term>,
+        span: Span,
     },
     Conditional {
         condition: Box<Term>,
         then_branch: Box<Term>,
         else_branch: Box<Term>,
+        span: Span,
     },
     Let {
         name: String,
         declared_type: Type,
         value: Box<Term>,
-        body: Box<Term>,
+        body: Box<Term>,       // pode ser Unit se não houver 'in'
+        span: Span,
     },
-    Ref(Box<Term>),
-    Deref(Box<Term>),
+    Ref {
+        inner: Box<Term>,
+        span: Span,
+    },
+    Deref {
+        inner: Box<Term>,
+        span: Span,
+    },
     Assign {
         target: Box<Term>,
         value: Box<Term>,
+        span: Span,
     },
+    /// Operador de sequência: `left ; right`. Avalia left, descarta, avalia right.
+    Sequence {
+        left: Box<Term>,
+        right: Box<Term>,
+        span: Span,
+    },
+}
+
+impl Term {
+    /// Retorna o span associado ao nó.
+    pub fn span(&self) -> Span {
+        match self {
+            Term::LiteralInteger { span, .. } => *span,
+            Term::LiteralBoolean { span, .. } => *span,
+            Term::Unit { span } => *span,
+            Term::Variable { span, .. } => *span,
+            Term::BinaryOperation { span, .. } => *span,
+            Term::UnaryOperation { span, .. } => *span,
+            Term::Conditional { span, .. } => *span,
+            Term::Let { span, .. } => *span,
+            Term::Ref { span, .. } => *span,
+            Term::Deref { span, .. } => *span,
+            Term::Assign { span, .. } => *span,
+            Term::Sequence { span, .. } => *span,
+        }
+    }
 }
 
 impl std::fmt::Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Term::LiteralInteger(n) => write!(f, "{n}"),
-            Term::LiteralBoolean(b) => write!(f, "{b}"),
-            Term::Unit => write!(f, "unit"),
-            Term::Variable(name) => write!(f, "{name}"),
-            Term::BinaryOperation { operator, left, right } => {
+            Term::LiteralInteger { value, .. } => write!(f, "{value}"),
+            Term::LiteralBoolean { value, .. } => write!(f, "{value}"),
+            Term::Unit { .. } => write!(f, "unit"),
+            Term::Variable { name, .. } => write!(f, "{name}"),
+            Term::BinaryOperation { operator, left, right, .. } => {
                 write!(f, "({left} {operator} {right})")
             }
-            Term::UnaryOperation { operator, operand } => {
+            Term::UnaryOperation { operator, operand, .. } => {
                 write!(f, "({operator} {operand})")
             }
-            Term::Conditional { condition, then_branch, else_branch } => {
+            Term::Conditional { condition, then_branch, else_branch, .. } => {
                 write!(f, "(if {condition} then {then_branch} else {else_branch})")
             }
-            Term::Let { name, declared_type, value, body } => {
+            Term::Let { name, declared_type, value, body, .. } => {
                 write!(f, "(let {name}: {declared_type} = {value} in {body})")
             }
-            Term::Ref(inner) => write!(f, "(ref {inner})"),
-            Term::Deref(inner) => write!(f, "(!{inner})"),
-            Term::Assign { target, value } => write!(f, "({target} := {value})"),
+            Term::Ref { inner, .. } => write!(f, "(ref {inner})"),
+            Term::Deref { inner, .. } => write!(f, "(!{inner})"),
+            Term::Assign { target, value, .. } => write!(f, "({target} := {value})"),
+            Term::Sequence { left, right, .. } => write!(f, "({left} ; {right})"),
         }
     }
 }

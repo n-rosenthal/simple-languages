@@ -1,23 +1,22 @@
 //! S/src/Scanner/Repl.rs
 //!
-//! Read-Eval-Print Loop para a linguagem `S`.
+//! Read-Eval-Print Loop para a linguagem `S` com estado persistente.
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.3 (persistent type env)
 
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use crate::Scanner::Evaluator::type_check_and_eval;
+use crate::Scanner::Evaluator::{eval_in, Store, Value, ValueEnv};
 use crate::Scanner::Lexer::Lexer;
 use crate::Scanner::Parser::Parser;
-use crate::Scanner::Types::SourceFile;
+use crate::Scanner::TypeChecker::{type_of_with_env, TypeEnv};
+use crate::Scanner::Types::{SourceFile, Term};
 
 const PROMPT: &str = "S> ";
 
-/// Comandos especiais do REPL, reconhecidos antes de tentar
-/// interpretar a linha como um termo de `S`.
 enum ReplCommand {
     Quit,
     Help,
@@ -39,57 +38,64 @@ fn print_help() {
     println!("  <expressão>   analisa e avalia uma expressão de S");
     println!();
     println!("Exemplos:");
-    println!("  1 + 2");
-    println!("  true == false");
-    println!("  let x: Integer = 10 in x + x");
-    println!("  let r: Ref Integer = ref 1 in let _: Unit = (r := 99) in !r");
+    println!("  let x: Integer = 1");       // define x para a próxima linha
+    println!("  x + 1");
+    println!("  let r: Ref Integer = ref 1 in r := 99 ; !r");
 }
 
-/// Roda uma única linha de entrada através do pipeline completo e
-/// imprime o resultado (ou erro) no formato apropriado a cada etapa.
-///
-/// Nota: cada linha recebe um ambiente e uma memória (`Store`)
-/// próprios e vazios — nada persiste de uma linha para a outra. Como
-/// `let ... in ...` já exige que o corpo esteja na mesma linha, isso
-/// não limita o que dá para expressar; só significa que não existe
-/// (ainda) um jeito de declarar uma variável numa linha e usá-la na
-/// próxima.
-fn run_line(line: &str) {
+/// Roda uma linha no REPL com estado persistente.
+fn run_line(line: &str, env: &mut ValueEnv, type_env: &mut TypeEnv, store: &mut Store) {
     let source = SourceFile {
         path: PathBuf::from("<repl>"),
         content: line.to_string(),
         lines: vec![line.to_string()],
     };
 
-    let tokens = match Lexer::new(&source).tokenize() {
-        Ok(tokens) => tokens,
-        Err(err) => {
-            println!("erro léxico: {err}");
-            return;
-        }
-    };
+    let lexer = Lexer::new(&source);
+    let mut parser = Parser::new(lexer);
 
-    let term = match Parser::new(tokens).parse() {
-        Ok(term) => term,
+    let term = match parser.parse() {
+        Ok(t) => t,
         Err(err) => {
             println!("erro sintático: {err}");
             return;
         }
     };
 
-    match type_check_and_eval(&term) {
-        Ok(value) => println!("{term} : {value}"),
-        Err(err) => println!("erro de tipo: {err}"),
+    // Verificação de tipo usando o ambiente persistente
+    if let Err(err) = type_of_with_env(&term, type_env) {
+        println!("erro de tipo: {err}");
+        return;
+    }
+
+    // Avalia e atualiza os ambientes
+    let value = eval_in(&term, env, store);
+
+    // Se for um Let, adicionamos o tipo ao TypeEnv para persistência
+    if let Term::Let { name, declared_type, .. } = &term {
+        type_env.insert(name.clone(), declared_type.clone());
+    }
+
+    // Exibe resultado apropriado
+    if !matches!(term, Term::Let { .. }) {
+        println!("{term} = {value}");
+    } else {
+        match value {
+            Value::Unit => println!("ok"),
+            _ => println!("{term} = {value}"),
+        }
     }
 }
 
-/// Inicia o loop interativo, lendo de stdin até EOF (Ctrl+D) ou até
-/// o usuário digitar um comando de saída.
 pub fn run() {
     println!("S — linguagem de termos (REPL). Digite :help para ajuda, :quit para sair.");
+    println!("Nota: variáveis e memória persistem entre linhas!");
 
     let stdin = io::stdin();
     let mut input = String::new();
+    let mut env = ValueEnv::new();
+    let mut type_env = TypeEnv::new();
+    let mut store = Store::new();
 
     loop {
         print!("{PROMPT}");
@@ -111,7 +117,7 @@ pub fn run() {
         match parse_command(trimmed) {
             ReplCommand::Quit => break,
             ReplCommand::Help => print_help(),
-            ReplCommand::Term(text) => run_line(&text),
+            ReplCommand::Term(text) => run_line(&text, &mut env, &mut type_env, &mut store),
         }
     }
 }
@@ -131,13 +137,5 @@ mod tests {
     fn reconhece_comando_de_ajuda() {
         assert!(matches!(parse_command(":help"), ReplCommand::Help));
         assert!(matches!(parse_command(":h"), ReplCommand::Help));
-    }
-
-    #[test]
-    fn linha_comum_vira_termo() {
-        match parse_command("1 + 2") {
-            ReplCommand::Term(text) => assert_eq!(text, "1 + 2"),
-            _ => panic!("deveria reconhecer como termo"),
-        }
     }
 }

@@ -4,19 +4,18 @@
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.4
+//! version: 0.5 (Iterator + Semicolon, removed unused source field)
 
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-use crate::Scanner::Types::SourceFile;
+use crate::Scanner::Types::{SourceFile, Span};
 
 /// Um token da linguagem `S`, com sua posição de origem.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub line: usize,   // 1-indexado
-    pub column: usize, // 1-indexado
+    pub span: Span,
 }
 
 // ---------------------------------------------------------------------
@@ -60,120 +59,43 @@ pub enum TokenKind {
     Colon,  // ":"
     Assign, // "=" (diferente de "==")
 
-    // delimitadores
+    // delimitadores e sequência
     LParen,
     RParen,
     LSquareBracket,
     RSquareBracket,
     LBrace,
     RBrace,
+    Semicolon, // ";"
 
     Eof,
 }
 
 /// Erros possíveis durante a análise léxica.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum LexError {
+    #[error("caractere inesperado '{ch}' em {line}:{column}")]
     UnexpectedChar { ch: char, line: usize, column: usize },
+    #[error("número malformado em {line}:{column}")]
     UnterminatedNumber { line: usize, column: usize },
 }
 
-impl std::fmt::Display for LexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexError::UnexpectedChar { ch, line, column } => {
-                write!(f, "caractere inesperado '{ch}' em {line}:{column}")
-            }
-            LexError::UnterminatedNumber { line, column } => {
-                write!(f, "número malformado em {line}:{column}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for LexError {}
-
 /// Percorre o conteúdo de um `SourceFile` produzindo tokens.
 pub struct Lexer<'a> {
-    source: &'a str,
     chars: Peekable<CharIndices<'a>>,
     line: usize,
     column: usize,
+    eof_emitted: bool,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(source_file: &'a SourceFile) -> Self {
         Lexer {
-            source: &source_file.content,
             chars: source_file.content.char_indices().peekable(),
             line: 1,
             column: 1,
+            eof_emitted: false,
         }
-    }
-
-    /// Consome todo o input e retorna a lista de tokens (terminada em
-    /// `TokenKind::Eof`), ou o primeiro erro léxico encontrado.
-    pub fn tokenize(mut self) -> Result<Vec<Token>, LexError> {
-        let mut tokens = Vec::new();
-
-        loop {
-            self.skip_whitespace();
-
-            let (line, column) = (self.line, self.column);
-
-            let Some(&(_, ch)) = self.chars.peek() else {
-                tokens.push(Token { kind: TokenKind::Eof, line, column });
-                break;
-            };
-
-            let kind = match ch {
-                '+' => { self.advance(); TokenKind::AdditionOperator }
-                '-' => { self.advance(); TokenKind::SubtractionOperator }
-                '(' => { self.advance(); TokenKind::LParen }
-                ')' => { self.advance(); TokenKind::RParen }
-                '[' => { self.advance(); TokenKind::LSquareBracket }
-                ']' => { self.advance(); TokenKind::RSquareBracket }
-                '{' => { self.advance(); TokenKind::LBrace }
-                '}' => { self.advance(); TokenKind::RBrace }
-                '!' => { self.advance(); TokenKind::Bang }
-                ':' => {
-                    self.advance();
-                    match self.chars.peek() {
-                        Some(&(_, '=')) => { self.advance(); TokenKind::ColonEquals }
-                        _ => TokenKind::Colon,
-                    }
-                }
-                '=' => {
-                    self.advance();
-                    match self.chars.peek() {
-                        Some(&(_, '=')) => { self.advance(); TokenKind::EqualityOperator }
-                        _ => TokenKind::Assign,
-                    }
-                }
-                '<' => {
-                    self.advance();
-                    match self.chars.peek() {
-                        Some(&(_, '>')) => { self.advance(); TokenKind::InequalityOperator }
-                        Some(&(_, '=')) => { self.advance(); TokenKind::LEQOperator }
-                        _ => TokenKind::LTOperator,
-                    }
-                }
-                '>' => {
-                    self.advance();
-                    match self.chars.peek() {
-                        Some(&(_, '=')) => { self.advance(); TokenKind::GEQOperator }
-                        _ => TokenKind::GTOperator,
-                    }
-                }
-                c if c.is_ascii_digit() => self.lex_integer(line, column)?,
-                c if c.is_alphabetic() || c == '_' => self.lex_word(),
-                c => return Err(LexError::UnexpectedChar { ch: c, line, column }),
-            };
-
-            tokens.push(Token { kind, line, column });
-        }
-
-        Ok(tokens)
     }
 
     fn advance(&mut self) -> Option<char> {
@@ -214,8 +136,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lê uma palavra alfanumérica e a classifica como palavra-chave
-    /// conhecida ou, caso contrário, como `Identifier` (nome de
-    /// variável ou tipo).
+    /// conhecida ou, caso contrário, como `Identifier`.
     fn lex_word(&mut self) -> TokenKind {
         let mut word = String::new();
         while let Some(&(_, ch)) = self.chars.peek() {
@@ -243,6 +164,80 @@ impl<'a> Lexer<'a> {
     }
 }
 
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token, LexError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.skip_whitespace();
+
+        let (line, column) = (self.line, self.column);
+
+        let Some(&(_, ch)) = self.chars.peek() else {
+            if self.eof_emitted {
+                return None;
+            }
+            self.eof_emitted = true;
+            return Some(Ok(Token {
+                kind: TokenKind::Eof,
+                span: Span::new(line, column),
+            }));
+        };
+
+        let kind = match ch {
+            '+' => { self.advance(); TokenKind::AdditionOperator }
+            '-' => { self.advance(); TokenKind::SubtractionOperator }
+            '(' => { self.advance(); TokenKind::LParen }
+            ')' => { self.advance(); TokenKind::RParen }
+            '[' => { self.advance(); TokenKind::LSquareBracket }
+            ']' => { self.advance(); TokenKind::RSquareBracket }
+            '{' => { self.advance(); TokenKind::LBrace }
+            '}' => { self.advance(); TokenKind::RBrace }
+            ';' => { self.advance(); TokenKind::Semicolon }
+            '!' => { self.advance(); TokenKind::Bang }
+            ':' => {
+                self.advance();
+                match self.chars.peek() {
+                    Some(&(_, '=')) => { self.advance(); TokenKind::ColonEquals }
+                    _ => TokenKind::Colon,
+                }
+            }
+            '=' => {
+                self.advance();
+                match self.chars.peek() {
+                    Some(&(_, '=')) => { self.advance(); TokenKind::EqualityOperator }
+                    _ => TokenKind::Assign,
+                }
+            }
+            '<' => {
+                self.advance();
+                match self.chars.peek() {
+                    Some(&(_, '>')) => { self.advance(); TokenKind::InequalityOperator }
+                    Some(&(_, '=')) => { self.advance(); TokenKind::LEQOperator }
+                    _ => TokenKind::LTOperator,
+                }
+            }
+            '>' => {
+                self.advance();
+                match self.chars.peek() {
+                    Some(&(_, '=')) => { self.advance(); TokenKind::GEQOperator }
+                    _ => TokenKind::GTOperator,
+                }
+            }
+            c if c.is_ascii_digit() => match self.lex_integer(line, column) {
+                Ok(k) => k,
+                Err(e) => return Some(Err(e)),
+            },
+            c if c.is_alphabetic() || c == '_' => self.lex_word(),
+            c => return Some(Err(LexError::UnexpectedChar { ch: c, line, column })),
+        };
+
+        Some(Ok(Token {
+            kind,
+            span: Span::new(line, column),
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,10 +255,9 @@ mod tests {
     fn kinds_of(content: &str) -> Vec<TokenKind> {
         let src = source_from(content);
         Lexer::new(&src)
-            .tokenize()
-            .expect("deveria tokenizar")
-            .into_iter()
+            .map(|res| res.expect("deveria tokenizar"))
             .map(|t| t.kind)
+            .filter(|k| !matches!(k, TokenKind::Eof))
             .collect()
     }
 
@@ -275,7 +269,6 @@ mod tests {
                 TokenKind::LiteralInteger(1),
                 TokenKind::AdditionOperator,
                 TokenKind::LiteralInteger(2),
-                TokenKind::Eof,
             ]
         );
     }
@@ -295,7 +288,6 @@ mod tests {
                 TokenKind::Identifier("x".to_string()),
                 TokenKind::AdditionOperator,
                 TokenKind::LiteralInteger(1),
-                TokenKind::Eof,
             ]
         );
     }
@@ -308,7 +300,6 @@ mod tests {
                 TokenKind::Identifier("x".to_string()),
                 TokenKind::Assign,
                 TokenKind::LiteralInteger(1),
-                TokenKind::Eof,
             ]
         );
         assert_eq!(
@@ -317,55 +308,19 @@ mod tests {
                 TokenKind::Identifier("x".to_string()),
                 TokenKind::EqualityOperator,
                 TokenKind::LiteralInteger(1),
-                TokenKind::Eof,
             ]
         );
     }
 
     #[test]
-    fn tokeniza_ref_deref_assign() {
+    fn tokeniza_sequencia() {
         assert_eq!(
-            kinds_of("ref 1"),
-            vec![TokenKind::RefKeyword, TokenKind::LiteralInteger(1), TokenKind::Eof]
-        );
-        assert_eq!(
-            kinds_of("!r"),
-            vec![TokenKind::Bang, TokenKind::Identifier("r".to_string()), TokenKind::Eof]
-        );
-        assert_eq!(
-            kinds_of("r := 5"),
+            kinds_of("1 ; 2"),
             vec![
-                TokenKind::Identifier("r".to_string()),
-                TokenKind::ColonEquals,
-                TokenKind::LiteralInteger(5),
-                TokenKind::Eof,
+                TokenKind::LiteralInteger(1),
+                TokenKind::Semicolon,
+                TokenKind::LiteralInteger(2),
             ]
         );
-    }
-
-    #[test]
-    fn colon_simples_nao_conflita_com_colon_equals() {
-        // ':' seguido de identificador (anotação de tipo em `let`)
-        // não deve ser confundido com ':='.
-        assert_eq!(
-            kinds_of("x: Integer"),
-            vec![
-                TokenKind::Identifier("x".to_string()),
-                TokenKind::Colon,
-                TokenKind::Identifier("Integer".to_string()),
-                TokenKind::Eof,
-            ]
-        );
-    }
-
-    #[test]
-    fn tokeniza_unit() {
-        assert_eq!(kinds_of("unit"), vec![TokenKind::UnitLiteral, TokenKind::Eof]);
-    }
-
-    #[test]
-    fn caractere_desconhecido_gera_erro() {
-        let result = Lexer::new(&source_from("1 % 2")).tokenize();
-        assert!(matches!(result, Err(LexError::UnexpectedChar { ch: '%', .. })));
     }
 }

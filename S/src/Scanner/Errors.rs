@@ -5,37 +5,18 @@
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.1
+//! version: 0.2 (with thiserror)
 
 use std::io;
 use std::path::PathBuf;
+use thiserror::Error;
 
 /// Erros possíveis na leitura de um arquivo-fonte.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ScannerError {
-    /// Falha de I/O ao abrir ou ler o arquivo (caminho inválido, sem
-    /// permissão, etc.).
-    Io(io::Error),
+    #[error("erro de I/O: {0}")]
+    Io(#[from] io::Error),
 
-    /// O arquivo existe e foi lido, mas está vazio.
+    #[error("arquivo vazio: {}", .0.display())]
     EmptyFile(PathBuf),
-}
-
-impl std::fmt::Display for ScannerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScannerError::Io(err) => write!(f, "erro de I/O: {err}"),
-            ScannerError::EmptyFile(path) => {
-                write!(f, "arquivo vazio: {}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ScannerError {}
-
-impl From<io::Error> for ScannerError {
-    fn from(err: io::Error) -> Self {
-        ScannerError::Io(err)
-    }
 }

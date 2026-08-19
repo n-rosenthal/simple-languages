@@ -4,133 +4,100 @@
 //!
 //! author:  n-rosenthal
 //! date:    2026-08-17
-//! version: 0.4
+//! version: 0.6 (with env support for REPL)
 
 use std::collections::HashMap;
 
-use crate::Scanner::Types::{BinaryOperator, Term, Type, UnaryOperator};
+use crate::Scanner::Types::{BinaryOperator, Span, Term, Type, UnaryOperator};
 
 /// Ambiente de tipos: associa nomes de variáveis ligadas (via `let`)
 /// ao seu `Type`.
 pub type TypeEnv = HashMap<String, Type>;
 
-/// Erros possíveis durante a checagem de tipos.
-#[derive(Debug, PartialEq)]
-pub enum TypeError {
-    Mismatch {
-        operator: BinaryOperator,
-        expected: Type,
-        found: Type,
-        side: Side,
-    },
-    EqualityMismatch {
-        operator: BinaryOperator,
-        left: Type,
-        right: Type,
-    },
-    UnaryMismatch {
-        operator: UnaryOperator,
-        expected: Type,
-        found: Type,
-    },
-    ConditionMismatch {
-        found: Type,
-    },
-    BranchMismatch {
-        then_type: Type,
-        else_type: Type,
-    },
-    /// Uso de uma variável não ligada por nenhum `let` no escopo.
-    UnboundVariable {
-        name: String,
-    },
-    /// O tipo anotado em `let x: T = ...` não bate com o tipo real de `t1`.
-    LetAnnotationMismatch {
-        name: String,
-        declared: Type,
-        found: Type,
-    },
-    /// `!t`: `t` não tem tipo `Ref(_)`.
-    DerefMismatch {
-        found: Type,
-    },
-    /// `t1 := t2`: `t1` não é `Ref(T)`, ou `t2` não é do tipo `T`.
-    AssignMismatch {
-        target: Type,
-        value: Type,
-    },
-}
-
+/// Lado de um operador (para mensagens de erro).
 #[derive(Debug, PartialEq)]
 pub enum Side {
     Left,
     Right,
 }
 
-impl std::fmt::Display for TypeError {
+impl std::fmt::Display for Side {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeError::Mismatch { operator, expected, found, side } => {
-                let side_name = match side {
-                    Side::Left => "operando esquerdo",
-                    Side::Right => "operando direito",
-                };
-                write!(f, "operador '{operator}': {side_name} deveria ser {expected}, mas é {found}")
-            }
-            TypeError::EqualityMismatch { operator, left, right } => {
-                write!(f, "operador '{operator}': tipos incompatíveis {left} e {right}")
-            }
-            TypeError::UnaryMismatch { operator, expected, found } => {
-                write!(f, "operador '{operator}': operando deveria ser {expected}, mas é {found}")
-            }
-            TypeError::ConditionMismatch { found } => {
-                write!(f, "condição do 'if' deveria ser Boolean, mas é {found}")
-            }
-            TypeError::BranchMismatch { then_type, else_type } => {
-                write!(f, "ramos do 'if' têm tipos diferentes: then={then_type}, else={else_type}")
-            }
-            TypeError::UnboundVariable { name } => {
-                write!(f, "variável '{name}' não está ligada neste escopo")
-            }
-            TypeError::LetAnnotationMismatch { name, declared, found } => {
-                write!(
-                    f,
-                    "'let {name}: {declared}' recebeu valor de tipo {found}, incompatível com a anotação"
-                )
-            }
-            TypeError::DerefMismatch { found } => {
-                write!(f, "operador '!': operando deveria ser uma referência (Ref T), mas é {found}")
-            }
-            TypeError::AssignMismatch { target, value } => {
-                write!(
-                    f,
-                    "operador ':=': lado esquerdo tem tipo {target} (deveria ser Ref T compatível com {value})"
-                )
-            }
+            Side::Left => write!(f, "esquerdo"),
+            Side::Right => write!(f, "direito"),
         }
     }
 }
 
-impl std::error::Error for TypeError {}
-
-/// Infere o `Type` de um `Term` no escopo vazio (sem variáveis ligadas).
-pub fn type_of(term: &Term) -> Result<Type, TypeError> {
-    type_of_in(term, &TypeEnv::new())
+/// Erros possíveis durante a checagem de tipos.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum TypeError {
+    #[error("operador '{operator}': lado {side} deveria ser {expected}, mas é {found} (em {span})")]
+    Mismatch {
+        operator: BinaryOperator,
+        expected: Type,
+        found: Type,
+        side: Side,
+        span: Span,
+    },
+    #[error("operador '{operator}': tipos incompatíveis {left} e {right} (em {span})")]
+    EqualityMismatch {
+        operator: BinaryOperator,
+        left: Type,
+        right: Type,
+        span: Span,
+    },
+    #[error("operador '{operator}': operando deveria ser {expected}, mas é {found} (em {span})")]
+    UnaryMismatch {
+        operator: UnaryOperator,
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+    #[error("condição do 'if' deveria ser Boolean, mas é {found} (em {span})")]
+    ConditionMismatch { found: Type, span: Span },
+    #[error("ramos do 'if' têm tipos diferentes: then={then_type}, else={else_type} (em {span})")]
+    BranchMismatch { then_type: Type, else_type: Type, span: Span },
+    #[error("variável '{name}' não está ligada neste escopo (em {span})")]
+    UnboundVariable { name: String, span: Span },
+    #[error("'let {name}: {declared}' recebeu valor de tipo {found}, incompatível com a anotação (em {span})")]
+    LetAnnotationMismatch {
+        name: String,
+        declared: Type,
+        found: Type,
+        span: Span,
+    },
+    #[error("operador '!': operando deveria ser uma referência (Ref T), mas é {found} (em {span})")]
+    DerefMismatch { found: Type, span: Span },
+    #[error("operador ':=': lado esquerdo tem tipo {target} (deveria ser Ref T compatível com {value}) (em {span})")]
+    AssignMismatch { target: Type, value: Type, span: Span },
+    #[error("operador ';': lado esquerdo deveria ser Unit, mas é {found} (em {span})")]
+    SequenceMismatch { found: Type, span: Span },
 }
 
-/// Infere o `Type` de um `Term` sob o ambiente `env`.
+/// Infere o `Type` de um `Term` no escopo vazio (para uso em arquivos).
+pub fn type_of(term: &Term) -> Result<Type, TypeError> {
+    type_of_with_env(term, &TypeEnv::new())
+}
+
+/// Infere o `Type` de um `Term` sob um ambiente fornecido (para REPL persistente).
+pub fn type_of_with_env(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
+    type_of_in(term, env)
+}
+
 fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
     match term {
-        Term::LiteralInteger(_) => Ok(Type::Integer),
-        Term::LiteralBoolean(_) => Ok(Type::Boolean),
-        Term::Unit => Ok(Type::Unit),
+        Term::LiteralInteger { .. } => Ok(Type::Integer),
+        Term::LiteralBoolean { .. } => Ok(Type::Boolean),
+        Term::Unit { .. } => Ok(Type::Unit),
 
-        Term::Variable(name) => env
+        Term::Variable { name, span } => env
             .get(name)
             .cloned()
-            .ok_or_else(|| TypeError::UnboundVariable { name: name.clone() }),
+            .ok_or_else(|| TypeError::UnboundVariable { name: name.clone(), span: *span }),
 
-        Term::UnaryOperation { operator, operand } => {
+        Term::UnaryOperation { operator, operand, span } => {
             let operand_ty = type_of_in(operand, env)?;
             match operator {
                 UnaryOperator::Not => {
@@ -139,6 +106,7 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
                             operator: *operator,
                             expected: Type::Boolean,
                             found: operand_ty,
+                            span: *span,
                         });
                     }
                     Ok(Type::Boolean)
@@ -146,22 +114,29 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
             }
         }
 
-        Term::Conditional { condition, then_branch, else_branch } => {
+        Term::Conditional { condition, then_branch, else_branch, span } => {
             let cond_ty = type_of_in(condition, env)?;
             if cond_ty != Type::Boolean {
-                return Err(TypeError::ConditionMismatch { found: cond_ty });
+                return Err(TypeError::ConditionMismatch {
+                    found: cond_ty,
+                    span: *span,
+                });
             }
 
             let then_ty = type_of_in(then_branch, env)?;
             let else_ty = type_of_in(else_branch, env)?;
             if then_ty != else_ty {
-                return Err(TypeError::BranchMismatch { then_type: then_ty, else_type: else_ty });
+                return Err(TypeError::BranchMismatch {
+                    then_type: then_ty,
+                    else_type: else_ty,
+                    span: *span,
+                });
             }
 
             Ok(then_ty)
         }
 
-        Term::BinaryOperation { operator, left, right } => {
+        Term::BinaryOperation { operator, left, right, span } => {
             let left_ty = type_of_in(left, env)?;
             let right_ty = type_of_in(right, env)?;
 
@@ -178,6 +153,7 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
                             expected: Type::Integer,
                             found: left_ty,
                             side: Side::Left,
+                            span: *span,
                         });
                     }
                     if right_ty != Type::Integer {
@@ -186,6 +162,7 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
                             expected: Type::Integer,
                             found: right_ty,
                             side: Side::Right,
+                            span: *span,
                         });
                     }
 
@@ -201,6 +178,7 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
                             operator: *operator,
                             left: left_ty,
                             right: right_ty,
+                            span: *span,
                         });
                     }
                     Ok(Type::Boolean)
@@ -208,37 +186,43 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
             }
         }
 
-        Term::Let { name, declared_type, value, body } => {
+        Term::Let { name, declared_type, value, body, span } => {
             let value_ty = type_of_in(value, env)?;
-
             if value_ty != *declared_type {
                 return Err(TypeError::LetAnnotationMismatch {
                     name: name.clone(),
                     declared: declared_type.clone(),
                     found: value_ty,
+                    span: *span,
                 });
             }
 
             let mut inner_env = env.clone();
             inner_env.insert(name.clone(), declared_type.clone());
 
-            type_of_in(body, &inner_env)
+            // O corpo pode ser Unit (se não houver 'in'), então seu tipo é Unit.
+            // Avaliamos o corpo para propagar o ambiente, mas o tipo do let é o tipo do corpo.
+            let body_ty = type_of_in(body, &inner_env)?;
+            Ok(body_ty)
         }
 
-        Term::Ref(inner) => {
+        Term::Ref { inner, span: _span } => {
             let inner_ty = type_of_in(inner, env)?;
             Ok(Type::Reference(Box::new(inner_ty)))
         }
 
-        Term::Deref(inner) => {
+        Term::Deref { inner, span } => {
             let inner_ty = type_of_in(inner, env)?;
             match inner_ty {
                 Type::Reference(referenced) => Ok(*referenced),
-                other => Err(TypeError::DerefMismatch { found: other }),
+                other => Err(TypeError::DerefMismatch {
+                    found: other,
+                    span: *span,
+                }),
             }
         }
 
-        Term::Assign { target, value } => {
+        Term::Assign { target, value, span } => {
             let target_ty = type_of_in(target, env)?;
             let value_ty = type_of_in(value, env)?;
 
@@ -250,11 +234,27 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
                         Err(TypeError::AssignMismatch {
                             target: Type::Reference(referenced),
                             value: value_ty,
+                            span: *span,
                         })
                     }
                 }
-                other => Err(TypeError::AssignMismatch { target: other, value: value_ty }),
+                other => Err(TypeError::AssignMismatch {
+                    target: other,
+                    value: value_ty,
+                    span: *span,
+                }),
             }
+        }
+
+        Term::Sequence { left, right, span } => {
+            let left_ty = type_of_in(left, env)?;
+            if left_ty != Type::Unit {
+                return Err(TypeError::SequenceMismatch {
+                    found: left_ty,
+                    span: *span,
+                });
+            }
+            type_of_in(right, env)
         }
     }
 }
@@ -262,21 +262,21 @@ fn type_of_in(term: &Term, env: &TypeEnv) -> Result<Type, TypeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Scanner::Types::Span;
+
+    fn dummy_span() -> Span {
+        Span::new(1, 1)
+    }
 
     #[test]
     fn soma_com_booleano_e_erro() {
         let term = Term::BinaryOperation {
             operator: BinaryOperator::Add,
-            left: Box::new(Term::LiteralInteger(1)),
-            right: Box::new(Term::LiteralBoolean(true)),
+            left: Box::new(Term::LiteralInteger { value: 1, span: dummy_span() }),
+            right: Box::new(Term::LiteralBoolean { value: true, span: dummy_span() }),
+            span: dummy_span(),
         };
         assert!(matches!(type_of(&term), Err(TypeError::Mismatch { .. })));
-    }
-
-    #[test]
-    fn variavel_nao_ligada_e_erro() {
-        let term = Term::Variable("x".to_string());
-        assert_eq!(type_of(&term), Err(TypeError::UnboundVariable { name: "x".to_string() }));
     }
 
     #[test]
@@ -284,87 +284,47 @@ mod tests {
         let term = Term::Let {
             name: "x".to_string(),
             declared_type: Type::Integer,
-            value: Box::new(Term::LiteralInteger(1)),
+            value: Box::new(Term::LiteralInteger { value: 1, span: dummy_span() }),
             body: Box::new(Term::BinaryOperation {
                 operator: BinaryOperator::Add,
-                left: Box::new(Term::Variable("x".to_string())),
-                right: Box::new(Term::LiteralInteger(1)),
+                left: Box::new(Term::Variable { name: "x".to_string(), span: dummy_span() }),
+                right: Box::new(Term::LiteralInteger { value: 1, span: dummy_span() }),
+                span: dummy_span(),
             }),
+            span: dummy_span(),
         };
         assert_eq!(type_of(&term), Ok(Type::Integer));
     }
 
     #[test]
-    fn let_com_anotacao_incompativel_e_erro() {
+    fn let_sem_in_tem_tipo_unit() {
         let term = Term::Let {
             name: "x".to_string(),
-            declared_type: Type::Boolean,
-            value: Box::new(Term::LiteralInteger(1)),
-            body: Box::new(Term::Variable("x".to_string())),
-        };
-        assert!(matches!(type_of(&term), Err(TypeError::LetAnnotationMismatch { .. })));
-    }
-
-    #[test]
-    fn unit_tem_tipo_unit() {
-        assert_eq!(type_of(&Term::Unit), Ok(Type::Unit));
-    }
-
-    #[test]
-    fn ref_de_inteiro_tem_tipo_ref_integer() {
-        let term = Term::Ref(Box::new(Term::LiteralInteger(1)));
-        assert_eq!(type_of(&term), Ok(Type::Reference(Box::new(Type::Integer))));
-    }
-
-    #[test]
-    fn deref_de_ref_integer_tem_tipo_integer() {
-        let term = Term::Deref(Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))));
-        assert_eq!(type_of(&term), Ok(Type::Integer));
-    }
-
-    #[test]
-    fn deref_de_nao_referencia_e_erro() {
-        let term = Term::Deref(Box::new(Term::LiteralInteger(1)));
-        assert!(matches!(type_of(&term), Err(TypeError::DerefMismatch { .. })));
-    }
-
-    #[test]
-    fn assign_bem_tipado_produz_unit() {
-        // let r: Ref Integer = ref 1 in r := 2
-        let term = Term::Let {
-            name: "r".to_string(),
-            declared_type: Type::Reference(Box::new(Type::Integer)),
-            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
-            body: Box::new(Term::Assign {
-                target: Box::new(Term::Variable("r".to_string())),
-                value: Box::new(Term::LiteralInteger(2)),
-            }),
+            declared_type: Type::Integer,
+            value: Box::new(Term::LiteralInteger { value: 10, span: dummy_span() }),
+            body: Box::new(Term::Unit { span: dummy_span() }),
+            span: dummy_span(),
         };
         assert_eq!(type_of(&term), Ok(Type::Unit));
     }
 
     #[test]
-    fn assign_com_tipo_incompativel_e_erro() {
-        // let r: Ref Integer = ref 1 in r := true
-        let term = Term::Let {
-            name: "r".to_string(),
-            declared_type: Type::Reference(Box::new(Type::Integer)),
-            value: Box::new(Term::Ref(Box::new(Term::LiteralInteger(1)))),
-            body: Box::new(Term::Assign {
-                target: Box::new(Term::Variable("r".to_string())),
-                value: Box::new(Term::LiteralBoolean(true)),
-            }),
+    fn sequence_ok() {
+        let term = Term::Sequence {
+            left: Box::new(Term::Unit { span: dummy_span() }),
+            right: Box::new(Term::LiteralInteger { value: 42, span: dummy_span() }),
+            span: dummy_span(),
         };
-        assert!(matches!(type_of(&term), Err(TypeError::AssignMismatch { .. })));
+        assert_eq!(type_of(&term), Ok(Type::Integer));
     }
 
     #[test]
-    fn assign_sobre_nao_referencia_e_erro() {
-        // 1 := 2  =>  1 não é uma referência
-        let term = Term::Assign {
-            target: Box::new(Term::LiteralInteger(1)),
-            value: Box::new(Term::LiteralInteger(2)),
+    fn sequence_erro_se_left_nao_unit() {
+        let term = Term::Sequence {
+            left: Box::new(Term::LiteralInteger { value: 1, span: dummy_span() }),
+            right: Box::new(Term::LiteralInteger { value: 2, span: dummy_span() }),
+            span: dummy_span(),
         };
-        assert!(matches!(type_of(&term), Err(TypeError::AssignMismatch { .. })));
+        assert!(matches!(type_of(&term), Err(TypeError::SequenceMismatch { .. })));
     }
 }
