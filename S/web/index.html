@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>S — terminal + playground</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1e1e;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #d4d4d4;
+  }
+  #header {
+    padding: 10px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid #333;
+    background: #1e1e1e;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+  }
+  #header .tab {
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 4px;
+    background: #2d2d2d;
+    transition: background 0.2s;
+  }
+  #header .tab.active {
+    background: #007acc;
+    color: white;
+  }
+  #header .tab:hover { background: #3d3d3d; }
+  #header .tab.active:hover { background: #007acc; }
+
+  .view {
+    display: none;
+    height: calc(100% - 50px);
+  }
+  .view.active {
+    display: flex;
+  }
+
+  /* --- Terminal view --- */
+  #terminal-view {
+    flex-direction: column;
+  }
+  #terminal {
+    flex: 1;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  /* --- Playground view --- */
+  #playground-view {
+    flex-direction: row;
+    gap: 0;
+    height: calc(100vh - 50px);
+  }
+  #editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: #1e1e1e;
+    border-right: 1px solid #333;
+  }
+  #editor-panel textarea {
+    flex: 1;
+    background: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 10px;
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 14px;
+    resize: none;
+    outline: none;
+  }
+  #editor-panel textarea:focus {
+    border-color: #007acc;
+  }
+  #editor-panel button {
+    margin-top: 8px;
+    padding: 8px 16px;
+    background: #007acc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+  }
+  #editor-panel button:hover { background: #005a9e; }
+
+  #output-panels {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: #1e1e1e;
+    gap: 8px;
+    overflow-y: auto;
+    min-width: 400px;
+  }
+  .output-panel {
+    background: #2d2d2d;
+    border-radius: 4px;
+    padding: 8px 12px;
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #444;
+    min-height: 100px;
+    white-space: pre-wrap;
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  .output-panel .label {
+    font-weight: bold;
+    color: #569cd6;
+    margin-bottom: 4px;
+  }
+  .output-panel .content {
+    color: #d4d4d4;
+  }
+  .output-panel .error {
+    color: #f48771;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span style="font-weight:bold;">S</span>
+  <span class="tab active" data-view="terminal">Terminal</span>
+  <span class="tab" data-view="playground">Playground</span>
+</div>
+
+<!-- Terminal View -->
+<div id="terminal-view" class="view active">
+  <div id="terminal"></div>
+</div>
+
+<!-- Playground View -->
+<div id="playground-view" class="view">
+  <div id="editor-panel">
+    <textarea id="code-input" placeholder="Digite sua expressão S aqui...&#10;Ex: let x: Integer = 10 in x + 1"></textarea>
+    <button id="analyze-btn">Analisar</button>
+  </div>
+  <div id="output-panels">
+    <div class="output-panel" id="ast-panel">
+      <div class="label">🌳 AST</div>
+      <div class="content" id="ast-content">(nenhuma expressão analisada)</div>
+    </div>
+    <div class="output-panel" id="type-value-panel">
+      <div class="label">📋 Tipo + Valor</div>
+      <div class="content" id="type-value-content">(nenhuma expressão analisada)</div>
+    </div>
+    <div class="output-panel" id="machine-panel">
+      <div class="label">⚙️ Instruções da Máquina</div>
+      <div class="content" id="machine-content">(nenhuma expressão analisada)</div>
+    </div>
+  </div>
+</div>
+
+<!-- xterm.js -->
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+
+<!-- WASM e lógica principal -->
+<script type="module">
+  import init, {
+    eval_line, reset_session, is_incomplete, version,
+    compile_bytecode, parse_ast, analyze
+  } from "../pkg/s.js";
+
+  const PROMPT = "S> ";
+  const CONTINUATION = "... ";
+
+  // --- Abas ---
+  const tabs = document.querySelectorAll('.tab');
+  const views = {
+    terminal: document.getElementById('terminal-view'),
+    playground: document.getElementById('playground-view'),
+  };
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const viewName = tab.dataset.view;
+      Object.keys(views).forEach(key => {
+        views[key].classList.toggle('active', key === viewName);
+      });
+      // Redimensiona o terminal quando a aba terminal for mostrada
+      if (viewName === 'terminal' && terminal) {
+        setTimeout(() => terminal.resize(terminal.cols, terminal.rows), 50);
+      }
+    });
+  });
+
+  // --- Inicialização do WASM ---
+  await init();
+
+  // --- Terminal ---
+  let terminal = null;
+  function initTerminal() {
+    if (terminal) return;
+    terminal = new Terminal({
+      convertEol: true,
+      fontFamily: "SFMono-Regular, Menlo, Consolas, monospace",
+      fontSize: 15,
+      theme: { background: "#1e1e1e", foreground: "#d4d4d4" },
+      cursorBlink: true,
+    });
+    terminal.open(document.getElementById('terminal'));
+
+    terminal.writeln(`S — linguagem de termos (v${version()}), rodando via WASM no navegador.`);
+    terminal.writeln("Digite :help para ajuda, :reset para limpar a sessão.");
+    terminal.write(PROMPT);
+
+    let buffer = "";
+    let lineInput = "";
+
+    function printHelp() {
+      terminal.writeln("Comandos disponíveis:");
+      terminal.writeln("  :help              mostra esta mensagem");
+      terminal.writeln("  :reset             limpa variáveis e memória da sessão");
+      terminal.writeln("  :asm <expr>        mostra o bytecode da SMachine");
+      terminal.writeln("  :machine <expr>    avalia <expr> na SMachine");
+      terminal.writeln("  <expressão>        avalia no avaliador em árvore (REPL)");
+      terminal.writeln("");
+      terminal.writeln("Nota: :asm e :machine operam sobre termos fechados (independentes da sessão).");
+    }
+
+    function handleEnter() {
+      terminal.writeln("");
+      const candidate = buffer.length > 0 ? buffer + "\n" + lineInput : lineInput;
+      lineInput = "";
+
+      const trimmed = candidate.trim();
+      if (trimmed === "") { buffer = ""; terminal.write(PROMPT); return; }
+
+      if (buffer === "" && trimmed === ":help") { printHelp(); terminal.write(PROMPT); return; }
+      if (buffer === "" && trimmed === ":reset") { reset_session(); terminal.writeln("sessão reiniciada."); terminal.write(PROMPT); return; }
+      if (buffer === "" && trimmed.startsWith(":asm ")) {
+        const expr = trimmed.slice(":asm ".length);
+        terminal.writeln(compile_bytecode(expr));
+        terminal.write(PROMPT);
+        return;
+      }
+      if (buffer === "" && trimmed.startsWith(":machine ")) {
+        const expr = trimmed.slice(":machine ".length);
+        terminal.writeln("SMachine: " + run_via_machine(expr));
+        terminal.write(PROMPT);
+        return;
+      }
+
+      if (is_incomplete(candidate)) {
+        buffer = candidate;
+        terminal.write(CONTINUATION);
+        return;
+      }
+
+      buffer = "";
+      const result = eval_line(candidate);
+      terminal.writeln(result);
+      terminal.write(PROMPT);
+    }
+
+    terminal.onData((data) => {
+      const code = data.charCodeAt(0);
+      if (data === "\r") { handleEnter(); return; }
+      if (code === 127) {
+        if (lineInput.length > 0) {
+          lineInput = lineInput.slice(0, -1);
+          terminal.write("\b \b");
+        }
+        return;
+      }
+      if (code < 32) return;
+      lineInput += data;
+      terminal.write(data);
+    });
+
+    terminal.focus();
+  }
+  initTerminal();
+
+  // --- Playground ---
+  const codeInput = document.getElementById('code-input');
+  const analyzeBtn = document.getElementById('analyze-btn');
+  const astContent = document.getElementById('ast-content');
+  const typeValueContent = document.getElementById('type-value-content');
+  const machineContent = document.getElementById('machine-content');
+
+  function updatePlayground() {
+    const code = codeInput.value.trim();
+    if (!code) {
+      astContent.textContent = '(nenhuma expressão analisada)';
+      typeValueContent.textContent = '(nenhuma expressão analisada)';
+      machineContent.textContent = '(nenhuma expressão analisada)';
+      return;
+    }
+
+    // AST
+    const astResult = parse_ast(code);
+    astContent.textContent = astResult;
+    astContent.className = astResult.startsWith('erro') ? 'content error' : 'content';
+
+    // Tipo + Valor
+    const tvResult = analyze(code);
+    typeValueContent.textContent = tvResult;
+    typeValueContent.className = tvResult.startsWith('erro') ? 'content error' : 'content';
+
+    // Máquina
+    const mcResult = compile_bytecode(code);
+    machineContent.textContent = mcResult;
+    machineContent.className = mcResult.startsWith('erro') ? 'content error' : 'content';
+  }
+
+  analyzeBtn.addEventListener('click', updatePlayground);
+  // Analisar automaticamente ao digitar? (opcional)
+  codeInput.addEventListener('input', updatePlayground); // análise ao vivo
+  // Inicializa com um exemplo
+  codeInput.value = 'let x: Integer = 10 in x + 1';
+  updatePlayground();
+
+  // Note: run_via_machine é usada no terminal, importamos do WASM.
+  // Precisamos importar run_via_machine também.
+  // Atualize a linha de importação para incluir run_via_machine.
+  // (Já incluí no import acima.)
+  // Como estamos usando import { ..., run_via_machine } from "../pkg/s.js"; 
+  // precisamos ter certeza que a função está exportada.
+  // No lib.rs, a função run_via_machine já está definida com #[wasm_bindgen].
+</script>
+</body>
+</html>

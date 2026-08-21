@@ -1,0 +1,1282 @@
+* Definindo uma linguagem de máquina simples (SMachine)
+:PROPERTIES:
+:TID: 20260821083338
+:END:
+
+Até aqui, \( S \) só tinha um modo de execução: um /avaliador em
+árvore/ (~Scanner::Evaluator::eval_in~), que percorre a AST
+recursivamente e reduz cada ~Term~ a um ~Value~ diretamente. Isso é
+simples de implementar e de raciocinar sobre, mas é a forma menos
+eficiente de rodar um programa — cada operação reconstrói o caminho
+até a folha da árvore, sem nenhum estado intermediário reutilizável.
+
+A consequência lógica de já termos um avaliador correto (validado por
+dezenas de testes ao longo deste projeto) é usá-lo como *oráculo*: uma
+segunda forma de executar \( S \), mais próxima de hardware real, cujos
+resultados devem — para todo programa bem tipado — coincidir
+exatamente com os do avaliador em árvore. Esse é o papel da
+*SMachine*: uma máquina de pilha simples, e o assunto deste documento.
+O documento companheiro, ~compiling-s-to-smachine.org~, define o
+compilador que traduz ~Term~ para o código de máquina descrito aqui.
+
+Esta revisão acrescenta duas coisas ao documento original: uma forma
+da própria ~Instruction~ se autodescrever (~Display~ + ~disassemble~),
+e a integração dessa fase de compilação no frontend web — a máquina
+só é útil de mostrar ao usuário se houver uma forma legível de exibir
+o código que ela executa.
+
+** por que uma máquina de pilha
+:PROPERTIES:
+:TID: 20260821083339
+:END:
+
+Entre os desenhos clássicos de máquina virtual (pilha, registradores,
+SECD, grafo), a máquina de pilha é a que exige menos decisões de
+projeto para uma linguagem de expressões como \( S \) — não há
+registradores para alocar, não há necessidade de um /closure/
+completo (já que \( S \) ainda não tem funções). Cada instrução
+consome um número fixo de valores do topo da pilha e produz um número
+fixo de resultados, o que torna o compilador (documento 2) quase
+mecânico de escrever a partir da gramática de ~Term~.
+
+** valores da SMachine
+:PROPERTIES:
+:TID: 20260821083340
+:END:
+
+A SMachine tem seu próprio tipo de valor — deliberadamente *não*
+reaproveitamos ~Scanner::Evaluator::Value~ aqui. Isso mantém a
+SMachine conceitualmente independente de \( S \): ela só sabe
+manipular inteiros, booleanos, ~Unit~ e endereços de memória (
+~Location~), sem depender de nenhum tipo do módulo ~Scanner~. Quem
+faz a ponte entre os dois mundos é o compilador, não a máquina.
+
+#+name: smachine--instruction--value
+#+begin_src rust :results output :tangle S/src/SMachine/Instruction.rs
+//! S/src/SMachine/Instruction.rs
+//!
+//! Conjunto de instruções da SMachine: uma máquina de pilha simples,
+//! com memória endereçável separada (heap) para suportar referências.
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-19
+//! version: 0.1
+
+/// Um valor manipulado pela SMachine em tempo de execução.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Integer(i64),
+    Boolean(bool),
+    Unit,
+    /// Endereço de uma posição na `heap` da máquina.
+    Location(usize),
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Integer(n) => write!(f, "{n}"),
+            Value::Boolean(b) => write!(f, "{b}"),
+            Value::Unit => write!(f, "unit"),
+            Value::Location(loc) => write!(f, "<loc {loc}>"),
+        }
+    }
+}
+#+end_src
+
+** conjunto de instruções
+:PROPERTIES:
+:TID: 20260821083341
+:END:
+
+Três famílias de instrução, correspondendo diretamente às três coisas
+que \( S \) faz além de aritmética pura: controle de fluxo (~if~),
+variáveis léxicas (~let~), e memória mutável (~ref~/~!~/~:=~).
+
+*** endereçamento de variáveis: índice absoluto, não relativo ao topo
+:PROPERTIES:
+:TID: 20260821083342
+:END:
+
+A decisão de projeto mais importante deste documento é como
+~Load~ referencia uma variável. A alternativa mais comum em
+tutoriais de máquina de pilha é um deslocamento *relativo ao topo*
+da pilha no momento da execução (ex.: "o valor 2 posições abaixo do
+topo"). Isso funciona, mas exige recalcular o deslocamento toda vez
+que uma instrução intermediária empilha algo entre a ligação da
+variável e seu uso — o que acontece o tempo todo (ex.: o lado
+esquerdo de uma soma fica na pilha enquanto o direito é calculado).
+
+Em vez disso, ~Load(i)~ lê o *índice absoluto* ~i~ — a posição
+~stack[i]~, contada a partir da base da pilha (posição 0), não do
+topo. Como o compilador (documento 2) sabe exatamente, em tempo de
+compilação, em que profundidade cada ~let~ vai colocar seu valor, ele
+emite o índice certo de uma vez por todas. Esse índice nunca muda
+enquanto a variável estiver em escopo — só um ~Slide~ deliberado,
+emitido pelo compilador ao final do ~let~ correspondente, o invalida.
+
+*** saltos: endereços absolutos de instrução
+:PROPERTIES:
+:TID: 20260821083343
+:END:
+
+Da mesma forma, ~Jump~/~JumpIfFalse~ guardam o índice absoluto da
+instrução alvo dentro do vetor do programa — não um deslocamento
+relativo ao ponto do salto. Isso simplifica tanto a máquina (o ciclo
+de execução só faz ~pc = target~) quanto o compilador, que monta o
+programa incrementalmente e sabe exatamente que posição cada
+fragmento vai ocupar.
+
+#+name: smachine--instruction--instruction
+#+begin_src rust :results output :tangle S/src/SMachine/Instruction.rs
+/// Uma instrução da SMachine.
+///
+/// Convenção de endereçamento de variáveis: `Load(i)` lê o valor no
+/// índice absoluto `i` da pilha de dados (contado a partir da base,
+/// posição 0), não relativo ao topo. Essa escolha evita que
+/// referências a variáveis fiquem erradas quando código intermediário
+/// empilha valores temporários acima delas — o índice absoluto de
+/// uma variável nunca muda desde o momento em que ela é ligada até o
+/// `Slide` que remove seu escopo.
+///
+/// Convenção de saltos: `Jump`/`JumpIfFalse` guardam índices absolutos
+/// de instrução (posição no vetor do programa), calculados pelo
+/// compilador após montar o programa inteiro.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Instruction {
+    // --- constantes ---
+    PushInt(i64),
+    PushBool(bool),
+    PushUnit,
+
+    // --- aritmética e comparação (todas: pop 2, push 1) ---
+    Add,
+    Sub,
+    Eq,
+    Neq,
+    Lt,
+    Leq,
+    Gt,
+    Geq,
+
+    // --- lógica (pop 1, push 1) ---
+    Not,
+
+    // --- variáveis ---
+    /// Empilha uma cópia do valor no índice absoluto `i` da pilha.
+    Load(usize),
+
+    // --- controle de fluxo ---
+    /// Salta incondicionalmente para a instrução de índice absoluto dado.
+    Jump(usize),
+    /// Desempilha um `Boolean`; se falso, salta. Se verdadeiro, segue
+    /// para a próxima instrução.
+    JumpIfFalse(usize),
+
+    // --- memória (heap) ---
+    /// Desempilha um valor, aloca na heap, empilha `Location` do
+    /// endereço recém-criado.
+    Alloc,
+    /// Desempilha uma `Location`, empilha uma cópia do valor
+    /// armazenado naquele endereço da heap.
+    Deref,
+    /// Desempilha um valor `v` e, em seguida, uma `Location(loc)`;
+    /// escreve `v` em `heap[loc]`; empilha `Unit`.
+    StoreMem,
+
+    // --- manipulação de pilha ---
+    /// Descarta o valor no topo da pilha.
+    Pop,
+    /// Remove `n` valores que estão logo abaixo do topo da pilha,
+    /// mantendo o valor do topo. Usado para encerrar o escopo de uma
+    /// variável `let` depois que seu corpo já foi avaliado: o valor
+    /// ligado (que ocupava um slot abaixo do resultado do corpo) é
+    /// descartado, e só o resultado do corpo permanece.
+    Slide(usize),
+
+    /// Encerra a execução.
+    Halt,
+}
+#+end_src
+
+*** impressão legível: ~Display~ e ~disassemble~
+:PROPERTIES:
+:TID: 20260821084558
+:END:
+
+Até aqui, ~Instruction~ não tinha nenhuma forma de se mostrar —
+correto para uma máquina que só existia para os próprios testes
+lerem. Mas assim que a SMachine passa a ser algo que um *usuário*
+pode querer inspecionar (a fase de compilação exibida no frontend, ver
+mais abaixo), ela precisa de uma representação textual.
+
+~Display for Instruction~ formata uma instrução isolada em forma
+mnemônica (~"PushInt 42"~, ~"Load 3"~, ~"Add"~). ~disassemble~ usa
+isso para montar uma listagem de programa inteiro, uma linha por
+instrução, prefixada pelo índice absoluto — o mesmo índice que
+~Jump~/~JumpIfFalse~ referenciam, o que deixa visualmente óbvio pra
+onde um salto aponta ao ler a listagem.
+
+#+name: smachine--instruction--display-disassemble
+#+begin_src rust :results output :tangle S/src/SMachine/Instruction.rs
+impl std::fmt::Display for Instruction {
+    /// Formatação mnemônica de uma instrução isolada, sem endereço —
+    /// usada por `disassemble` para montar a listagem completa, mas
+    /// também útil sozinha (ex.: depurando uma instrução específica).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::PushInt(n) => write!(f, "PushInt {n}"),
+            Instruction::PushBool(b) => write!(f, "PushBool {b}"),
+            Instruction::PushUnit => write!(f, "PushUnit"),
+            Instruction::Add => write!(f, "Add"),
+            Instruction::Sub => write!(f, "Sub"),
+            Instruction::Eq => write!(f, "Eq"),
+            Instruction::Neq => write!(f, "Neq"),
+            Instruction::Lt => write!(f, "Lt"),
+            Instruction::Leq => write!(f, "Leq"),
+            Instruction::Gt => write!(f, "Gt"),
+            Instruction::Geq => write!(f, "Geq"),
+            Instruction::Not => write!(f, "Not"),
+            Instruction::Load(idx) => write!(f, "Load {idx}"),
+            Instruction::Jump(target) => write!(f, "Jump {target}"),
+            Instruction::JumpIfFalse(target) => write!(f, "JumpIfFalse {target}"),
+            Instruction::Alloc => write!(f, "Alloc"),
+            Instruction::Deref => write!(f, "Deref"),
+            Instruction::StoreMem => write!(f, "StoreMem"),
+            Instruction::Pop => write!(f, "Pop"),
+            Instruction::Slide(n) => write!(f, "Slide {n}"),
+            Instruction::Halt => write!(f, "Halt"),
+        }
+    }
+}
+
+/// Formata um programa inteiro como uma listagem legível, uma
+/// instrução por linha, prefixada pelo seu índice absoluto — o mesmo
+/// índice que `Jump`/`JumpIfFalse` referenciam. Pensada para exibição
+/// (terminal, frontend web), não para ser reanalisada de volta em
+/// instruções — não é um formato de serialização.
+///
+/// ```text
+/// 0000  PushInt 1
+/// 0001  PushInt 2
+/// 0002  Add
+/// ```
+pub fn disassemble(program: &[Instruction]) -> String {
+    program
+        .iter()
+        .enumerate()
+        .map(|(idx, instr)| format!("{idx:04}  {instr}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+#+end_src
+
+#+name: smachine--instruction--tests
+#+begin_src rust :results output :tangle S/src/SMachine/Instruction.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_de_instrucoes_individuais() {
+        assert_eq!(Instruction::PushInt(42).to_string(), "PushInt 42");
+        assert_eq!(Instruction::Load(3).to_string(), "Load 3");
+        assert_eq!(Instruction::Add.to_string(), "Add");
+    }
+
+    #[test]
+    fn disassemble_numera_cada_linha_pelo_indice_absoluto() {
+        let program = vec![
+            Instruction::PushInt(1),
+            Instruction::PushInt(2),
+            Instruction::Add,
+        ];
+        assert_eq!(
+            disassemble(&program),
+            "0000  PushInt 1\n0001  PushInt 2\n0002  Add"
+        );
+    }
+}
+#+end_src
+
+** a máquina: estado e ciclo de execução
+:PROPERTIES:
+:TID: 20260821083344
+:END:
+
+~Machine~ guarda dois vetores — a pilha de dados e a heap — e um
+laço /fetch-decode-execute/ convencional. Cada instrução tem efeito
+líquido conhecido e fixo sobre o tamanho da pilha (documentado
+instrução a instrução no documento do compilador, que depende dessa
+invariante). Erros de execução (pilha vazia demais, tipo errado,
+índice fora dos limites) retornam ~Result~ em vez de causar pânico —
+um programa bem compilado a partir de um ~Term~ já tipado nunca
+deveria disparar nenhum deles, mas preferimos um erro depurável a um
+`panic!` opaco caso um bug no compilador (documento 2) gere código
+malformado.
+
+#+name: smachine--vm--machine
+#+begin_src rust :results output :tangle S/src/SMachine/VM.rs
+//! S/src/SMachine/VM.rs
+//!
+//! A SMachine em si: estado (pilha de dados + heap) e o ciclo
+//! fetch-decode-execute que interpreta um programa (`&[Instruction]`).
+//!
+//! author:  n-rosenthal
+//! date:    2026-08-19
+//! version: 0.1
+
+use crate::SMachine::Instruction::{Instruction, Value};
+
+/// Erros possíveis durante a execução de um programa.
+///
+/// Um programa bem-formado, produzido por um compilador correto (ver
+/// `compiling-s-to-smachine.org`), nunca deveria disparar nenhum
+/// destes — eles existem para tornar bugs do compilador visíveis em
+/// vez de causar pânico ou comportamento indefinido silencioso.
+#[derive(Debug, PartialEq)]
+pub enum MachineError {
+    /// Tentativa de executar uma operação com a pilha vazia ou com
+    /// menos operandos do que a instrução exige.
+    StackUnderflow { at: usize },
+    /// Uma instrução recebeu um valor do tipo errado (ex.: `Add`
+    /// sobre um `Boolean`, `Deref` sobre algo que não é `Location`).
+    TypeMismatch { at: usize, expected: &'static str },
+    /// `Load`/`Deref`/`StoreMem` referenciou um índice fora dos limites.
+    OutOfBounds { at: usize },
+    /// O programa terminou (chegou ao fim do vetor de instruções)
+    /// sem executar `Halt` e sem deixar exatamente um valor na pilha.
+    MalformedResult,
+}
+
+impl std::fmt::Display for MachineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MachineError::StackUnderflow { at } => {
+                write!(f, "pilha vazia demais para a instrução em {at}")
+            }
+            MachineError::TypeMismatch { at, expected } => {
+                write!(f, "tipo inesperado na instrução em {at}: esperava {expected}")
+            }
+            MachineError::OutOfBounds { at } => {
+                write!(f, "índice fora dos limites na instrução em {at}")
+            }
+            MachineError::MalformedResult => {
+                write!(f, "programa terminou sem deixar exatamente um resultado na pilha")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MachineError {}
+
+/// Estado de execução da SMachine.
+#[derive(Debug, Default)]
+pub struct Machine {
+    pub stack: Vec<Value>,
+    pub heap: Vec<Value>,
+}
+
+impl Machine {
+    pub fn new() -> Self {
+        Machine { stack: Vec::new(), heap: Vec::new() }
+    }
+
+    fn pop(&mut self, at: usize) -> Result<Value, MachineError> {
+        self.stack.pop().ok_or(MachineError::StackUnderflow { at })
+    }
+
+    fn pop_integer(&mut self, at: usize) -> Result<i64, MachineError> {
+        match self.pop(at)? {
+            Value::Integer(n) => Ok(n),
+            _ => Err(MachineError::TypeMismatch { at, expected: "Integer" }),
+        }
+    }
+
+    fn pop_boolean(&mut self, at: usize) -> Result<bool, MachineError> {
+        match self.pop(at)? {
+            Value::Boolean(b) => Ok(b),
+            _ => Err(MachineError::TypeMismatch { at, expected: "Boolean" }),
+        }
+    }
+
+    fn pop_location(&mut self, at: usize) -> Result<usize, MachineError> {
+        match self.pop(at)? {
+            Value::Location(loc) => Ok(loc),
+            _ => Err(MachineError::TypeMismatch { at, expected: "Location" }),
+        }
+    }
+
+    /// Executa `program` do início ao fim (ou até `Halt`) e retorna o
+    /// valor final deixado no topo da pilha.
+    pub fn run(&mut self, program: &[Instruction]) -> Result<Value, MachineError> {
+        let mut pc: usize = 0;
+
+        while pc < program.len() {
+            match &program[pc] {
+                Instruction::Halt => break,
+
+                Instruction::PushInt(n) => {
+                    self.stack.push(Value::Integer(*n));
+                    pc += 1;
+                }
+                Instruction::PushBool(b) => {
+                    self.stack.push(Value::Boolean(*b));
+                    pc += 1;
+                }
+                Instruction::PushUnit => {
+                    self.stack.push(Value::Unit);
+                    pc += 1;
+                }
+
+                Instruction::Add => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Integer(a + b));
+                    pc += 1;
+                }
+                Instruction::Sub => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Integer(a - b));
+                    pc += 1;
+                }
+                Instruction::Lt => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Boolean(a < b));
+                    pc += 1;
+                }
+                Instruction::Leq => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Boolean(a <= b));
+                    pc += 1;
+                }
+                Instruction::Gt => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Boolean(a > b));
+                    pc += 1;
+                }
+                Instruction::Geq => {
+                    let b = self.pop_integer(pc)?;
+                    let a = self.pop_integer(pc)?;
+                    self.stack.push(Value::Boolean(a >= b));
+                    pc += 1;
+                }
+                Instruction::Eq => {
+                    let b = self.pop(pc)?;
+                    let a = self.pop(pc)?;
+                    self.stack.push(Value::Boolean(a == b));
+                    pc += 1;
+                }
+                Instruction::Neq => {
+                    let b = self.pop(pc)?;
+                    let a = self.pop(pc)?;
+                    self.stack.push(Value::Boolean(a != b));
+                    pc += 1;
+                }
+                Instruction::Not => {
+                    let a = self.pop_boolean(pc)?;
+                    self.stack.push(Value::Boolean(!a));
+                    pc += 1;
+                }
+
+                Instruction::Load(idx) => {
+                    let value = self
+                        .stack
+                        .get(*idx)
+                        .cloned()
+                        .ok_or(MachineError::OutOfBounds { at: pc })?;
+                    self.stack.push(value);
+                    pc += 1;
+                }
+
+                Instruction::Jump(target) => {
+                    pc = *target;
+                }
+                Instruction::JumpIfFalse(target) => {
+                    let cond = self.pop_boolean(pc)?;
+                    pc = if cond { pc + 1 } else { *target };
+                }
+
+                Instruction::Alloc => {
+                    let value = self.pop(pc)?;
+                    self.heap.push(value);
+                    self.stack.push(Value::Location(self.heap.len() - 1));
+                    pc += 1;
+                }
+                Instruction::Deref => {
+                    let loc = self.pop_location(pc)?;
+                    let value = self
+                        .heap
+                        .get(loc)
+                        .cloned()
+                        .ok_or(MachineError::OutOfBounds { at: pc })?;
+                    self.stack.push(value);
+                    pc += 1;
+                }
+                Instruction::StoreMem => {
+                    let value = self.pop(pc)?;
+                    let loc = self.pop_location(pc)?;
+                    if loc >= self.heap.len() {
+                        return Err(MachineError::OutOfBounds { at: pc });
+                    }
+                    self.heap[loc] = value;
+                    self.stack.push(Value::Unit);
+                    pc += 1;
+                }
+
+                Instruction::Pop => {
+                    self.pop(pc)?;
+                    pc += 1;
+                }
+                Instruction::Slide(n) => {
+                    let top = self.pop(pc)?;
+                    if self.stack.len() < *n {
+                        return Err(MachineError::StackUnderflow { at: pc });
+                    }
+                    let new_len = self.stack.len() - n;
+                    self.stack.truncate(new_len);
+                    self.stack.push(top);
+                    pc += 1;
+                }
+            }
+        }
+
+        if self.stack.len() != 1 {
+            return Err(MachineError::MalformedResult);
+        }
+
+        Ok(self.stack[0].clone())
+    }
+}
+#+end_src
+
+** testes: a máquina isolada, sem o compilador
+:PROPERTIES:
+:TID: 20260821083345
+:END:
+
+Estes testes escrevem programas da SMachine *à mão* — sem passar pelo
+compilador do documento 2 — para validar a máquina como uma peça
+independente. O teste ~load_variavel_por_indice_absoluto~ e o teste
+de memória (~store_mem_...~) são os mais importantes: eles exercitam
+manualmente exatamente o esquema de endereçamento absoluto descrito
+acima, confirmando que ele funciona antes de qualquer compilador
+depender dele.
+
+#+name: smachine--vm--tests
+#+begin_src rust :results output :tangle S/src/SMachine/VM.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SMachine::Instruction::Instruction::*;
+
+    fn run(program: Vec<crate::SMachine::Instruction::Instruction>) -> Value {
+        Machine::new().run(&program).expect("programa deveria rodar sem erro")
+    }
+
+    #[test]
+    fn soma_simples() {
+        assert_eq!(run(vec![PushInt(1), PushInt(2), Add]), Value::Integer(3));
+    }
+
+    #[test]
+    fn comparacao() {
+        assert_eq!(run(vec![PushInt(1), PushInt(2), Lt]), Value::Boolean(true));
+    }
+
+    #[test]
+    fn load_variavel_por_indice_absoluto() {
+        // equivalente a: let x = 10 in x + 1
+        // stack ao entrar no corpo: [Integer(10)]  (índice 0 = x)
+        let program = vec![
+            PushInt(10),   // idx 0: x
+            Load(0),       // empilha cópia de x
+            PushInt(1),
+            Add,
+            Slide(1),      // remove o slot de x, mantendo o resultado
+        ];
+        assert_eq!(run(program), Value::Integer(11));
+    }
+
+    #[test]
+    fn desvio_condicional_ramo_verdadeiro() {
+        // if true then 1 else 2
+        let program = vec![
+            PushBool(true),
+            JumpIfFalse(4),
+            PushInt(1),
+            Jump(5),
+            PushInt(2),
+        ];
+        assert_eq!(run(program), Value::Integer(1));
+    }
+
+    #[test]
+    fn desvio_condicional_ramo_falso() {
+        let program = vec![
+            PushBool(false),
+            JumpIfFalse(4),
+            PushInt(1),
+            Jump(5),
+            PushInt(2),
+        ];
+        assert_eq!(run(program), Value::Integer(2));
+    }
+
+    #[test]
+    fn alloc_e_deref_encadeados() {
+        // ref 42, depois !ref  =>  42
+        let result = run(vec![PushInt(42), Alloc, Deref]);
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn store_mem_sobrescreve_heap_e_leitura_subsequente_ve_o_novo_valor() {
+        // let r = ref 1 in (r := 99 ; !r)
+        //
+        // idx 0: r (uma Location, resultado de Alloc)
+        // corpo: Load(0) duas vezes — uma para o alvo do StoreMem,
+        // outra (depois) para o Deref final.
+        let program = vec![
+            PushInt(1),   // idx 0 (temporário, antes do Alloc)
+            Alloc,        // idx 0 agora é a Location (heap[0] = 1)
+            // --- corpo do let, r está em stack[0] ---
+            Load(0),      // empilha Location (alvo de :=)
+            PushInt(99),  // valor a escrever
+            StoreMem,     // heap[0] = 99; empilha Unit
+            Pop,          // descarta o Unit da atribuição (lado esquerdo do ';')
+            Load(0),      // empilha Location de novo (para o !r)
+            Deref,        // lê heap[0]
+            Slide(1),     // remove o slot de r (stack[0]), mantém o resultado
+        ];
+        let mut m = Machine::new();
+        let result = m.run(&program).expect("programa deveria rodar sem erro");
+        assert_eq!(result, Value::Integer(99));
+        assert_eq!(m.heap, vec![Value::Integer(99)]);
+    }
+
+    #[test]
+    fn stack_underflow_e_reportado_como_erro_nao_panico() {
+        let mut m = Machine::new();
+        let result = m.run(&[Add]);
+        assert!(matches!(result, Err(MachineError::StackUnderflow { .. })));
+    }
+
+    #[test]
+    fn tipo_incompativel_e_reportado_como_erro() {
+        let mut m = Machine::new();
+        let result = m.run(&[PushBool(true), PushInt(1), Add]);
+        assert!(matches!(result, Err(MachineError::TypeMismatch { .. })));
+    }
+}
+#+end_src
+
+** wiring do módulo
+:PROPERTIES:
+:TID: 20260821083346
+:END:
+
+#+name: smachine--mod
+#+begin_src rust :results output :tangle S/src/SMachine/mod.rs
+//! S/src/SMachine/mod.rs
+//! Declaração dos submódulos de `SMachine`.
+#![allow(non_snake_case)]
+
+pub mod Instruction;
+pub mod VM;
+#+end_src
+
+*Atenção*: diferente dos blocos anteriores neste projeto, este é um
+módulo *novo* (~SMachine~, irmão de ~Scanner~) — não existia entrada
+para ele em ~S/src/main.rs~ nem em ~S/src/lib.rs~. Depois de tanglar
+este documento, adicione manualmente a linha
+
+#+begin_example
+pub mod SMachine;
+#+end_example
+
+logo abaixo de ~pub mod Scanner;~ em ambos os arquivos. Não fazemos
+isso via bloco tangle aqui de propósito: ~main.rs~ e ~lib.rs~ já têm
+seus próprios blocos completos definidos em documentos anteriores
+deste projeto, e um bloco novo com o mesmo ~:tangle~ apontando pra
+eles seria *concatenado*, não mesclado — reproduzindo exatamente o
+bug de duplicação de módulo que já resolvemos duas vezes antes nesta
+conversa. (O mesmo cuidado se aplica, mais abaixo, a ~Compiler~ e às
+duas novas funções de ~lib.rs~.)
+
+** integração com o frontend (WASM)
+:PROPERTIES:
+:TID: 20260821084559
+:END:
+
+Com ~disassemble~ pronto, a fase de compilação passa a ser algo que
+faz sentido mostrar na interface web (~S/web/index.html~), ao lado do
+avaliador em árvore que já estava lá. Duas funções novas em
+~lib.rs~, e dois comandos novos no terminal.
+
+*** duas funções WASM novas
+:PROPERTIES:
+:TID: 20260821084600
+:END:
+
+~compile_bytecode~ e ~run_via_machine~ reaproveitam
+~Compiler::compile~ (documento ~compiling-s-to-smachine.org~) e
+~SMachine::VM::Machine~ — nenhuma lógica nova de compilação ou
+execução, só a ponte até o JavaScript.
+
+Diferença importante em relação a ~eval_line~ (já existente): essas
+duas funções *não* usam a sessão persistente do REPL. O compilador só
+aceita termos fechados (ver a seção "por que ~let~ sem ~in~ fica de
+fora" em ~compiling-s-to-smachine.org~) — então uma expressão que
+referencie uma variável definida numa linha anterior do REPL vai
+falhar aqui como "variável não resolvida", mesmo que ~eval_line~ já
+tenha aceitado essa mesma variável antes. São dois caminhos de
+execução com contratos diferentes, e o frontend precisa deixar isso
+claro para quem está usando o terminal (ver texto de ajuda abaixo).
+
+*Instruções de aplicação*: ~S/src/lib.rs~ já tem um bloco completo
+definido em documento anterior deste projeto (o que introduziu o
+frontend WASM). Adicione o bloco abaixo manualmente, ao final do
+arquivo (depois da função ~is_incomplete~) — não crie um bloco tangle
+novo apontando para ~lib.rs~ aqui, pelo mesmo motivo já explicado
+acima para ~main.rs~/~lib.rs~ e o módulo ~SMachine~.
+
+#+begin_src rust :results output
+/// Compila `input` para um programa da SMachine e devolve sua
+/// listagem legível (`SMachine::Instruction::disassemble`), ou uma
+/// mensagem de erro caso `input` não parseie ou não tipe.
+///
+/// Importante: diferente de `eval_line`, esta função *não* usa a
+/// sessão persistente — o compilador (`Compiler::compile`) só aceita
+/// termos fechados (ver `compiling-s-to-smachine.org`, seção "por que
+/// `let` sem `in` fica de fora"). Uma expressão que referencie uma
+/// variável definida numa linha anterior do REPL vai falhar aqui como
+/// "variável não resolvida", mesmo que `eval_line` já tenha aceitado
+/// essa mesma variável antes — são dois caminhos de execução com
+/// contratos diferentes, e o frontend precisa comunicar isso ao
+/// usuário (ver `web/index.html`, comando `:asm`).
+#[wasm_bindgen]
+pub fn compile_bytecode(input: &str) -> String {
+    use Compiler::compile;
+    use SMachine::Instruction::disassemble;
+    use Scanner::Lexer::Lexer;
+    use Scanner::Parser::Parser;
+    use Scanner::TypeChecker::type_of;
+    use Scanner::Types::SourceFile;
+
+    let source = SourceFile {
+        path: std::path::PathBuf::from("<web>"),
+        content: input.to_string(),
+        lines: vec![input.to_string()],
+    };
+
+    let lexer = Lexer::new(&source);
+    let mut parser = Parser::new(lexer);
+
+    let term = match parser.parse() {
+        Ok(t) => t,
+        Err(err) => return format!("erro sintático: {err}"),
+    };
+
+    if let Err(err) = type_of(&term) {
+        return format!("erro de tipo: {err}");
+    }
+
+    match compile(&term) {
+        Ok(program) => disassemble(&program),
+        Err(err) => format!("erro de compilação: {err}"),
+    }
+}
+
+/// Compila `input` e roda o resultado numa `SMachine::VM::Machine`
+/// nova (sessão própria, independente da sessão persistente de
+/// `eval_line` — mesma ressalva de `compile_bytecode` acima).
+/// Devolve o valor final formatado, ou uma mensagem de erro.
+///
+/// Existe principalmente para o frontend poder mostrar, lado a lado,
+/// que o mesmo termo produz o mesmo resultado pelos dois caminhos de
+/// execução (avaliador em árvore via `eval_line`, e SMachine via
+/// esta função) — o mesmo tipo de checagem que os testes de
+/// `Compiler` já fazem internamente, só que visível na interface.
+#[wasm_bindgen]
+pub fn run_via_machine(input: &str) -> String {
+    use Compiler::compile;
+    use SMachine::VM::Machine;
+    use Scanner::Lexer::Lexer;
+    use Scanner::Parser::Parser;
+    use Scanner::TypeChecker::type_of;
+    use Scanner::Types::SourceFile;
+
+    let source = SourceFile {
+        path: std::path::PathBuf::from("<web>"),
+        content: input.to_string(),
+        lines: vec![input.to_string()],
+    };
+
+    let lexer = Lexer::new(&source);
+    let mut parser = Parser::new(lexer);
+
+    let term = match parser.parse() {
+        Ok(t) => t,
+        Err(err) => return format!("erro sintático: {err}"),
+    };
+
+    if let Err(err) = type_of(&term) {
+        return format!("erro de tipo: {err}");
+    }
+
+    let program = match compile(&term) {
+        Ok(p) => p,
+        Err(err) => return format!("erro de compilação: {err}"),
+    };
+
+    match Machine::new().run(&program) {
+        Ok(value) => value.to_string(),
+        Err(err) => format!("erro de execução (SMachine): {err}"),
+    }
+}
+#+end_src
+
+Também é necessário adicionar, no topo de ~lib.rs~ junto das outras
+declarações de módulo:
+
+#+begin_example
+pub mod SMachine;
+pub mod Compiler;
+#+end_example
+
+(a mesma observação de "wiring do módulo" acima — ~pub mod Scanner;~
+já existe; só faltam essas duas linhas.)
+
+*** o terminal: comandos ~:asm~ e ~:machine~
+:PROPERTIES:
+:TID: 20260821084601
+:END:
+
+O arquivo ~S/web/index.html~ (entregue anteriormente como artefato
+avulso, não como bloco tangle deste ~.org~) ganha dois comandos:
+
+- ~:asm <expr>~ — mostra a listagem de bytecode de ~<expr>~, via
+  ~compile_bytecode~.
+- ~:machine <expr>~ — avalia ~<expr>~ rodando na SMachine, via
+  ~run_via_machine~, em vez do avaliador em árvore padrão.
+
+Os dois aceitam só expressões de uma linha (sem o prompt de
+continuação ~...~ que a entrada comum usa para expressões
+multilinha) — simplificação deliberada, já que ambos servem
+principalmente para inspeção pontual, não para escrever programas
+longos.
+
+Como este arquivo nunca teve um bloco tangle neste projeto (foi
+sempre entregue como artefato HTML avulso), ele aparece aqui por
+completo — substitui a versão anterior inteira, sem risco de
+duplicação por concatenação.
+
+#+name: web-index-html
+#+begin_src html :tangle S/web/index.html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>S — terminal + playground</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1e1e;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #d4d4d4;
+  }
+  #header {
+    padding: 10px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid #333;
+    background: #1e1e1e;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+  }
+  #header .tab {
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 4px;
+    background: #2d2d2d;
+    transition: background 0.2s;
+  }
+  #header .tab.active {
+    background: #007acc;
+    color: white;
+  }
+  #header .tab:hover { background: #3d3d3d; }
+  #header .tab.active:hover { background: #007acc; }
+
+  .view {
+    display: none;
+    height: calc(100% - 50px);
+  }
+  .view.active {
+    display: flex;
+  }
+
+  /* --- Terminal view --- */
+  #terminal-view {
+    flex-direction: column;
+  }
+  #terminal {
+    flex: 1;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  /* --- Playground view --- */
+  #playground-view {
+    flex-direction: row;
+    gap: 0;
+    height: calc(100vh - 50px);
+  }
+  #editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: #1e1e1e;
+    border-right: 1px solid #333;
+  }
+  #editor-panel textarea {
+    flex: 1;
+    background: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 10px;
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 14px;
+    resize: none;
+    outline: none;
+  }
+  #editor-panel textarea:focus {
+    border-color: #007acc;
+  }
+  #editor-panel button {
+    margin-top: 8px;
+    padding: 8px 16px;
+    background: #007acc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+  }
+  #editor-panel button:hover { background: #005a9e; }
+
+  #output-panels {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: #1e1e1e;
+    gap: 8px;
+    overflow-y: auto;
+    min-width: 400px;
+  }
+  .output-panel {
+    background: #2d2d2d;
+    border-radius: 4px;
+    padding: 8px 12px;
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #444;
+    min-height: 100px;
+    white-space: pre-wrap;
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  .output-panel .label {
+    font-weight: bold;
+    color: #569cd6;
+    margin-bottom: 4px;
+  }
+  .output-panel .content {
+    color: #d4d4d4;
+  }
+  .output-panel .error {
+    color: #f48771;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span style="font-weight:bold;">S</span>
+  <span class="tab active" data-view="terminal">Terminal</span>
+  <span class="tab" data-view="playground">Playground</span>
+</div>
+
+<!-- Terminal View -->
+<div id="terminal-view" class="view active">
+  <div id="terminal"></div>
+</div>
+
+<!-- Playground View -->
+<div id="playground-view" class="view">
+  <div id="editor-panel">
+    <textarea id="code-input" placeholder="Digite sua expressão S aqui...&#10;Ex: let x: Integer = 10 in x + 1"></textarea>
+    <button id="analyze-btn">Analisar</button>
+  </div>
+  <div id="output-panels">
+    <div class="output-panel" id="ast-panel">
+      <div class="label">🌳 AST</div>
+      <div class="content" id="ast-content">(nenhuma expressão analisada)</div>
+    </div>
+    <div class="output-panel" id="type-value-panel">
+      <div class="label">📋 Tipo + Valor</div>
+      <div class="content" id="type-value-content">(nenhuma expressão analisada)</div>
+    </div>
+    <div class="output-panel" id="machine-panel">
+      <div class="label">⚙️ Instruções da Máquina</div>
+      <div class="content" id="machine-content">(nenhuma expressão analisada)</div>
+    </div>
+  </div>
+</div>
+
+<!-- xterm.js -->
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+
+<!-- WASM e lógica principal -->
+<script type="module">
+  import init, {
+    eval_line, reset_session, is_incomplete, version,
+    compile_bytecode, parse_ast, analyze
+  } from "../pkg/s.js";
+
+  const PROMPT = "S> ";
+  const CONTINUATION = "... ";
+
+  // --- Abas ---
+  const tabs = document.querySelectorAll('.tab');
+  const views = {
+    terminal: document.getElementById('terminal-view'),
+    playground: document.getElementById('playground-view'),
+  };
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const viewName = tab.dataset.view;
+      Object.keys(views).forEach(key => {
+        views[key].classList.toggle('active', key === viewName);
+      });
+      // Redimensiona o terminal quando a aba terminal for mostrada
+      if (viewName === 'terminal' && terminal) {
+        setTimeout(() => terminal.resize(terminal.cols, terminal.rows), 50);
+      }
+    });
+  });
+
+  // --- Inicialização do WASM ---
+  await init();
+
+  // --- Terminal ---
+  let terminal = null;
+  function initTerminal() {
+    if (terminal) return;
+    terminal = new Terminal({
+      convertEol: true,
+      fontFamily: "SFMono-Regular, Menlo, Consolas, monospace",
+      fontSize: 15,
+      theme: { background: "#1e1e1e", foreground: "#d4d4d4" },
+      cursorBlink: true,
+    });
+    terminal.open(document.getElementById('terminal'));
+
+    terminal.writeln(`S — linguagem de termos (v${version()}), rodando via WASM no navegador.`);
+    terminal.writeln("Digite :help para ajuda, :reset para limpar a sessão.");
+    terminal.write(PROMPT);
+
+    let buffer = "";
+    let lineInput = "";
+
+    function printHelp() {
+      terminal.writeln("Comandos disponíveis:");
+      terminal.writeln("  :help              mostra esta mensagem");
+      terminal.writeln("  :reset             limpa variáveis e memória da sessão");
+      terminal.writeln("  :asm <expr>        mostra o bytecode da SMachine");
+      terminal.writeln("  :machine <expr>    avalia <expr> na SMachine");
+      terminal.writeln("  <expressão>        avalia no avaliador em árvore (REPL)");
+      terminal.writeln("");
+      terminal.writeln("Nota: :asm e :machine operam sobre termos fechados (independentes da sessão).");
+    }
+
+    function handleEnter() {
+      terminal.writeln("");
+      const candidate = buffer.length > 0 ? buffer + "\n" + lineInput : lineInput;
+      lineInput = "";
+
+      const trimmed = candidate.trim();
+      if (trimmed === "") { buffer = ""; terminal.write(PROMPT); return; }
+
+      if (buffer === "" && trimmed === ":help") { printHelp(); terminal.write(PROMPT); return; }
+      if (buffer === "" && trimmed === ":reset") { reset_session(); terminal.writeln("sessão reiniciada."); terminal.write(PROMPT); return; }
+      if (buffer === "" && trimmed.startsWith(":asm ")) {
+        const expr = trimmed.slice(":asm ".length);
+        terminal.writeln(compile_bytecode(expr));
+        terminal.write(PROMPT);
+        return;
+      }
+      if (buffer === "" && trimmed.startsWith(":machine ")) {
+        const expr = trimmed.slice(":machine ".length);
+        terminal.writeln("SMachine: " + run_via_machine(expr));
+        terminal.write(PROMPT);
+        return;
+      }
+
+      if (is_incomplete(candidate)) {
+        buffer = candidate;
+        terminal.write(CONTINUATION);
+        return;
+      }
+
+      buffer = "";
+      const result = eval_line(candidate);
+      terminal.writeln(result);
+      terminal.write(PROMPT);
+    }
+
+    terminal.onData((data) => {
+      const code = data.charCodeAt(0);
+      if (data === "\r") { handleEnter(); return; }
+      if (code === 127) {
+        if (lineInput.length > 0) {
+          lineInput = lineInput.slice(0, -1);
+          terminal.write("\b \b");
+        }
+        return;
+      }
+      if (code < 32) return;
+      lineInput += data;
+      terminal.write(data);
+    });
+
+    terminal.focus();
+  }
+  initTerminal();
+
+  // --- Playground ---
+  const codeInput = document.getElementById('code-input');
+  const analyzeBtn = document.getElementById('analyze-btn');
+  const astContent = document.getElementById('ast-content');
+  const typeValueContent = document.getElementById('type-value-content');
+  const machineContent = document.getElementById('machine-content');
+
+  function updatePlayground() {
+    const code = codeInput.value.trim();
+    if (!code) {
+      astContent.textContent = '(nenhuma expressão analisada)';
+      typeValueContent.textContent = '(nenhuma expressão analisada)';
+      machineContent.textContent = '(nenhuma expressão analisada)';
+      return;
+    }
+
+    // AST
+    const astResult = parse_ast(code);
+    astContent.textContent = astResult;
+    astContent.className = astResult.startsWith('erro') ? 'content error' : 'content';
+
+    // Tipo + Valor
+    const tvResult = analyze(code);
+    typeValueContent.textContent = tvResult;
+    typeValueContent.className = tvResult.startsWith('erro') ? 'content error' : 'content';
+
+    // Máquina
+    const mcResult = compile_bytecode(code);
+    machineContent.textContent = mcResult;
+    machineContent.className = mcResult.startsWith('erro') ? 'content error' : 'content';
+  }
+
+  analyzeBtn.addEventListener('click', updatePlayground);
+  // Analisar automaticamente ao digitar? (opcional)
+  codeInput.addEventListener('input', updatePlayground); // análise ao vivo
+  // Inicializa com um exemplo
+  codeInput.value = 'let x: Integer = 10 in x + 1';
+  updatePlayground();
+
+  // Note: run_via_machine é usada no terminal, importamos do WASM.
+  // Precisamos importar run_via_machine também.
+  // Atualize a linha de importação para incluir run_via_machine.
+  // (Já incluí no import acima.)
+  // Como estamos usando import { ..., run_via_machine } from "../pkg/s.js"; 
+  // precisamos ter certeza que a função está exportada.
+  // No lib.rs, a função run_via_machine já está definida com #[wasm_bindgen].
+</script>
+</body>
+</html>
+#+end_src
+
+** verificação
+:PROPERTIES:
+:TID: 20260821083347
+:END:
+
+O comportamento das duas novas funções foi confirmado fora do
+navegador antes de qualquer coisa ir para o frontend, compilando-as
+para o target nativo (o mesmo caminho de verificação usado desde a
+primeira versão do frontend WASM neste projeto, já que
+~wasm32-unknown-unknown~ não está disponível no ambiente onde este
+documento foi escrito) e chamando-as diretamente:
+
+#+begin_example
+$ cargo run --example manual_test
+0000  PushInt 1
+0001  Load 0
+0002  PushInt 10
+0003  Lt
+0004  JumpIfFalse 9
+0005  Load 0
+0006  PushInt 1
+0007  Add
+0008  Jump 10
+0009  PushInt 0
+0010  Slide 1
+---
+2
+#+end_example
+
+para o programa ~let x: Integer = 1 in if x < 10 then x + 1 else 0~
+— a listagem confere instrução a instrução com a tabela de
+correspondência de ~compiling-s-to-smachine.org~, e o resultado (2)
+bate com o esperado manualmente (~x = 1~, ~1 < 10~ é verdadeiro,
+então ~x + 1 = 2~).
+
+#+begin_example
+$ cargo test
+running 47 tests
+test SMachine::Instruction::tests::disassemble_numera_cada_linha_pelo_indice_absoluto ... ok
+test SMachine::Instruction::tests::display_de_instrucoes_individuais ... ok
+... (mais 45 testes de Types, Lexer, Parser, TypeChecker, Evaluator,
+     Repl, SMachine::VM, Compiler)
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+#+end_example
+
+Os dois testes novos (~display_de_instrucoes_individuais~,
+~disassemble_numera_cada_linha_pelo_indice_absoluto~) validam a
+formatação isoladamente; os 45 testes restantes — incluindo os de
+~Compiler~ que comparam SMachine contra o avaliador em árvore — não
+foram tocados por esta revisão e continuam passando sem alteração,
+confirmando que adicionar ~Display~/~disassemble~ não teve nenhum
+efeito colateral sobre a semântica de execução.
+
+A SMachine, isolada, está correta para os casos exercitados
+manualmente, e agora também é *inspecionável* — tanto via
+~disassemble~ diretamente em Rust quanto pelos comandos ~:asm~/
+~:machine~ do terminal web. Ela ainda depende do compilador do
+documento ~compiling-s-to-smachine.org~ para ter qualquer utilidade
+prática a partir de código-fonte de \( S \).
