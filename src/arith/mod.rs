@@ -9,6 +9,9 @@ pub mod type_checker;
 pub mod types;
 pub mod values;
 pub mod terms;
+pub mod latex_impls;
+pub mod small_step;
+
 
 pub use evaluator::*;
 pub use lexer::*;

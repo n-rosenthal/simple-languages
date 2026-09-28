@@ -31,6 +31,15 @@
 //! Type            Value
 //! ```
 
+// common/mod.rs
+pub mod latex;
+pub mod derivation;
+
+pub use latex::ToLatex;
+pub use derivation::{Derivation, Judgment};
+
+pub mod small_step;
+pub use small_step::{SmallStepEvaluator, Step, Trace};
 
 // =============================================================================
 // Source
@@ -243,7 +252,7 @@ pub trait Evaluator {
 
     fn evaluate(
         term: &Self::Term,
-    ) -> Result<(Self::Value, Vec<Self::Rule>), Self::Error>;
+    ) -> Result<Derivation<Self::Rule, Self::Term, Self::Value>, Self::Error>;
 }
 
 
