@@ -1,0 +1,56 @@
+#+title:    Implementation of the Simply Typed Lambda Calculus in Rust
+#+author:   n-rosenthal
+
+* Introduction
+** Syntax
+#+begin_example
+t ::=                       terms:
+        x                   variable
+        \lambda x. t        abstraction
+        t1 t2               application
+
+v ::=                       values:
+        \lambda x :T.t      abstraction value
+
+T ::=                       types:
+        T1 -> T2            function type
+
+\Gama ::=                   contexts:
+        \emptyset           empty context
+        \Gama, x:T          term variable binding
+#+end_example
+
+** Evaluation \( t \to t' \)
+#+begin_example
+(E-App_1)
+        t1 -> t1'
+        -----------------
+        t1 t2 -> t1' t2
+
+(E-App_2)
+        t2 -> t2'
+        -----------------
+        v1 t2 -> v1 t2'
+
+(E-AppAbs)
+        -----------------
+        (\lambda x:T.t12) v2 -> [x |-> v2] t12
+#+end_example
+
+** Typing \( \Gama \vdash t : T \)
+#+begin_example
+(T-Var)
+        x:T \in \Gama
+        -----------------
+        \Gama \vdash x : T
+
+(T-Abs)
+        \Gama, x:T1 \vdash t2 : T2
+        -----------------
+        \Gama \vdash \lambda x:T1.t2 : T1 -> T2
+
+(T-App)
+        \Gama \vdash t1 : T1 -> T2    \Gama \vdash t2 : T1
+        -----------------
+        \Gama \vdash t1 t2 : T2
+#+end_example
