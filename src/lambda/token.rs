@@ -22,17 +22,19 @@ use crate::common::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LambdaTokenType {
     // Literals
-    Variable,         // x, identifier (variables)
+    Identifier,           // x, identifier (variables)
 
     // Keywords
-    Lambda,           // λ, lambda abstraction
-    Dot,              // ., dot in lambda abstraction
-    LeftParen,        // (, left parenthesis
-    RightParen,       // ), right parenthesis
+    Lambda,             // λ, lambda abstraction
+    Dot,                // ., dot in lambda abstraction
+    Colon,              // :, colon in type annotations
+    Arrow,              // ->, arrow in type annotations
+    LeftParen,          // (, left parenthesis
+    RightParen,         // ), right parenthesis
 
-    If,               // if, conditional
-    Then,             // then, conditional
-    Else,             // else, conditional
+    If,                 // if, conditional
+    Then,               // then, conditional
+    Else,               // else, conditional
 
     // Types
     Boolean,          // bool, boolean type
@@ -51,12 +53,15 @@ impl fmt::Display for LambdaTokenType {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let text = match self {
-            Self::Variable => "var",
+            Self::Identifier => "var",
 
             Self::Lambda => "λ",
             Self::Dot => ".",
             Self::LeftParen => "(",
             Self::RightParen => ")",
+            Self::Colon => ":",
+            Self::Arrow => "->",
+
 
             Self::If => "if",
             Self::Then => "then",
@@ -93,7 +98,7 @@ impl LambdaToken {
     /// Creates a new `LambdaToken` with the given kind, lexeme, and span.
     pub fn new(
         kind: LambdaTokenType,
-        lexeme: String,
+        lexeme: impl Into<String>,
         span: Span
     )   ->  Self {
             Self { 

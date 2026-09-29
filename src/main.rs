@@ -2,6 +2,7 @@ use simple_languages::arith::evaluator::ArithEvaluator;
 use simple_languages::arith::{BinaryOp, Term};
 use simple_languages::common::Evaluator;
 
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (2 * 3) + (4 - 5)
     let term = Term::binary(

@@ -315,6 +315,7 @@ impl Lexer for ArithLexer {
 mod tests {
     use super::*;
     use crate::common::Scanner;
+    use crate::arith::ArithScanner;
 
     #[test]
     fn scans_lines() {
