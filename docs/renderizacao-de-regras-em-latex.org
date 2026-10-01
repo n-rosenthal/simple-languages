@@ -1,9 +1,27 @@
+#+title:    renderização de regras em LaTeX 
+#+author:   nícolas rosenthal
+#+date:     \date
+#+version:  1.0.0
+#+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/latex.rs
+
+Este documento define e implementa o módulo ~common/latex~, responsável pela geração de LaTeX.
+
+* /header/
+#+name:    simple-languages--common--latex--header  
+#+date:    <2026-09-30>
+#+begin_src rust
 //! Geração de LaTeX.
 //!
 //! O trait [`ToLatex`] e funções auxiliares para regras de inferência.
 //! As árvores de derivação usam o pacote `mathpartir`
 //! (`\usepackage{mathpartir}`), cujo `\inferrule*` aninha naturalmente.
+#+end_src
 
+* implementação
+
+#+name:    simple-languages--common--latex--def
+#+date:    <2026-09-30>
+#+begin_src rust
 /// Tipos que sabem se escrever em LaTeX (modo matemático).
 pub trait ToLatex {
     fn to_latex(&self) -> String;
@@ -63,7 +81,13 @@ pub fn standalone_document(body: &str) -> String {
          \\begin{{document}}\n$\\displaystyle\n{body}\n$\n\\end{{document}}\n"
     )
 }
+#+end_src
 
+* testes unitários
+
+#+name:    simple-languages--common--latex--test
+#+date:    <2026-09-30>
+#+begin_src rust
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,3 +126,5 @@ mod tests {
         assert!(doc.contains("mathpartir") && doc.contains("BODY"));
     }
 }
+#+end_src
+
