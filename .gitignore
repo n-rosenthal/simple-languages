@@ -2,3 +2,7 @@
 *.bak
 target/*
 target
+flycheck/*
+flycheck
+*.json
+*.log
