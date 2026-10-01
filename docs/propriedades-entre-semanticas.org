@@ -1,14 +1,14 @@
 #+title:    ~laws~: propriedades que relacionam duas semânticas (operacionais)
 #+author:   nícolas rosenthal
 #+date:     \date
-#+version:  1.0.0
+#+version:  1.0.1
 #+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/semantics/laws.rs 
 
 propriedades que relacionam duas semânticas (operacionais), escritas uma vez para qualquer linguagem. por enquanto só segurança, que usa Typing e BigStep.
 
 * /header/
 #+name:    simple-languages--semantics--laws--header  
-#+date:    <2026-09-30>
+#+date:    <2026-10-01>
 #+begin_src rust
 //! Propriedades que relacionam semânticas diferentes.
 //!
@@ -17,6 +17,8 @@ propriedades que relacionam duas semânticas (operacionais), escritas uma vez pa
 //! as chamam com termos de exemplo.
 
 use super::big_step::BigStep;
+use super::machine::Machine;
+use super::step::{run, Step, Trace};
 use super::typing::Typing;
 #+end_src
 
@@ -39,6 +41,65 @@ where
     B: BigStep<Term = T::Term>,
 {
     !T::is_well_typed(term) || B::evaluate(term).is_ok()
+}
+
+/// Estados finais não dão passos. Sem isto, `is_final` e `step`
+/// discordariam sobre o que é um valor.
+pub fn final_states_do_not_step<S: Step>(state: &S::State) -> bool {
+    !S::is_final(state) || S::step(state).is_none()
+}
+
+/// Um trace é uma cadeia consistente: cada passo parte de onde o
+/// anterior chegou, e o último chega ao estado final registrado.
+pub fn trace_is_connected<S: Step>(trace: &Trace<S>) -> bool
+where
+    S::State: PartialEq,
+{
+    let mut expected = &trace.start;
+    for transition in &trace.steps {
+        if &transition.from != expected {
+            return false;
+        }
+        expected = &transition.to;
+    }
+    expected == &trace.final_state
+}
+
+/// Small-step e big-step concordam: se `t ⇓ v`, a execução small-step
+/// termina em `v`; se `t` não tem derivação, ela não termina em valor.
+pub fn small_step_agrees_with_big_step<S, B>(term: &S::State) -> bool
+where
+    S: Step,
+    B: BigStep<Term = S::State>,
+    B::Value: Into<S::State>,
+    S::State: PartialEq,
+{
+    let trace = run::<S>(term.clone());
+
+    match B::value_of(term) {
+        Ok(value) => {
+            let expected: S::State = value.into();
+            trace.is_final() && trace.final_state == expected
+        }
+        Err(_) => !trace.is_final(),
+    }
+}
+
+/// A máquina concorda com a semântica natural: é a *correção* da
+/// compilação. Se `t ⇓ v`, a máquina termina com `v`; senão, não produz
+/// valor algum.
+pub fn machine_agrees_with_big_step<M, B>(term: &M::Term) -> bool
+where
+    M: Machine,
+    B: BigStep<Term = M::Term, Value = M::Value>,
+    M::Value: PartialEq,
+{
+    let execution = M::execute(term);
+
+    match B::value_of(term) {
+        Ok(expected) => execution.value.as_ref() == Some(&expected),
+        Err(_) => execution.value.is_none(),
+    }
 }
 #+end_src
 
