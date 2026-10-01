@@ -1,7 +1,7 @@
 #+title:    ~laws~: propriedades que relacionam duas semânticas (operacionais)
 #+author:   nícolas rosenthal
 #+date:     \date
-#+version:  1.0.1
+#+version:  1.0.2
 #+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/semantics/laws.rs 
 
 propriedades que relacionam duas semânticas (operacionais), escritas uma vez para qualquer linguagem. por enquanto só segurança, que usa Typing e BigStep.
@@ -99,6 +99,33 @@ where
     match B::value_of(term) {
         Ok(expected) => execution.value.as_ref() == Some(&expected),
         Err(_) => execution.value.is_none(),
+    }
+}
+
+/// Progresso: um termo bem tipado nunca fica travado (pode terminar ou
+/// divergir). Vale vacuamente para termos mal tipados.
+pub fn well_typed_never_gets_stuck<T, S>(term: &T::Term) -> bool
+where
+    T: Typing,
+    S: Step<State = T::Term>,
+{
+    !T::is_well_typed(term) || !run::<S>(term.clone()).is_stuck()
+}
+
+/// Preservação: se `t : T` e `t → t'`, então `t' : T`.
+pub fn preservation<T, S>(term: &T::Term) -> bool
+where
+    T: Typing,
+    S: Step<State = T::Term>,
+    T::Type: PartialEq,
+{
+    let Ok(before) = T::type_of(term) else {
+        return true;
+    };
+
+    match S::step(term) {
+        None => true,
+        Some(transition) => T::type_of(&transition.to).map_or(false, |after| after == before),
     }
 }
 #+end_src
