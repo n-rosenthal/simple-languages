@@ -224,8 +224,6 @@ mod tests {
     // --- teste novo: a árvore de fato carrega os termos concretos ---
     #[test]
     fn derivation_carries_concrete_terms_and_latex_renders() {
-        use crate::common::ToLatex;
-
         let term = Term::binary(BinaryOp::Add, Term::integer(1), Term::integer(2));
         let derivation = ArithEvaluator::evaluate(&term).unwrap();
 

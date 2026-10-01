@@ -1,25 +1,36 @@
-// common/small_step.rs
-//! Infraestrutura genérica para semântica operacional small-step
-//! (passo a passo): uma relação de redução `term → term'`, aplicada
-//! repetidamente até atingir um termo em forma normal (ou travar).
-//!
-//! Paralelo direto de `derivation.rs` (big-step), mas onde big-step
-//! produz uma árvore de premissas, small-step produz uma sequência —
-//! o traço de reescrita.
+// common/operational_semantics.rs
+//! Generic infrastructure for small-step operational semantics
+//! 
+//! A relation of reduction `term → term'`, applied iteratively until
+//! a term in normal form (or stuck).
+//! 
+//! Direct parallel of `derivation.rs` (big-step), but where big-step
+//! produces a tree of premises, small-step produces a sequence,
+//! the rewrite trace.
+//! 
+
+/// Small-step operational semantics
+/// The `SmallStep` trait defines what is expected from a operational
+/// semantics step relation: 
+///       - a term `Term` and a reduction rule `Rule`.
+pub trait SmallStep {
+    //  a term
+    type Term: Clone;
+    type Rule: Clone;
+}
+
 
 use super::latex::ToLatex;
 
-/// Um único passo de redução: `term → next`, justificado pela regra
-/// `rule`. Diferente de `Judgment` (big-step, que relaciona termo a
-/// *valor*), aqui os dois lados são *termos* — o resultado de um
-/// passo pode não ser um valor final, só um termo "um pouco mais
-/// reduzido".
+/// the result of a single small-step reduction: the rule applied, the
+/// term before, and the term after.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step<R, T> {
     pub rule: R,
     pub from: T,
-    pub to: T,
+    pub to  : T,
 }
+
 
 impl<R, T> Step<R, T> {
     pub fn new(rule: R, from: T, to: T) -> Self {
@@ -27,6 +38,7 @@ impl<R, T> Step<R, T> {
     }
 }
 
+/// Renders a single step as a LaTeX string.
 impl<R: ToLatex, T: ToLatex> ToLatex for Step<R, T> {
     fn to_latex(&self) -> String {
         format!(
@@ -38,12 +50,12 @@ impl<R: ToLatex, T: ToLatex> ToLatex for Step<R, T> {
     }
 }
 
-/// Um traço de redução completo: a sequência de passos até a forma
-/// normal (ou até travar/errar). `final_term` é o último termo do
-/// traço — se `is_stuck` for falso, é uma forma normal "de verdade"
-/// (um valor); se verdadeiro, a redução parou porque nenhuma regra
-/// se aplicava a um termo que não é um valor (termo mal formado
-/// semanticamente, ex.: `true + 1` em `arith`).
+/// A complete reduction trace: the sequence of steps until normal
+/// form (or until stuck/erroneous). `final_term` is the last term in
+/// the trace — if `is_stuck` is false, it's a true normal form
+/// (a value); if true, the reduction stopped because no rule applied
+/// to a term that is not a value (semantically malformed term,
+/// e.g., `true + 1` in `arith`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trace<R, T> {
     pub steps: Vec<Step<R, T>>,

@@ -1,0 +1,82 @@
+#+title:    definindo a semântica formal de uma linguagem de programação simples
+#+author:   nícolas rosenthal
+#+date:     \date
+#+version:  1.0.0
+#+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/semantics/mod.rs 
+
+* O módulo ~core/semantics~
+Em ~core/semantics~, devemos definir seis módulos:
+
+- ~rule.rs~:        as /regras/ de inferência. Uma regra é um nome (por exemplo, ~E-IfTrue~ ou ~T-Abs~) associado a um esquema de premissas e conclusão. Define o /trait/ ~Rule~, que é implementado pelos conjuntos de regras de cada linguagem (regras de avaliação e regras de tipagem) e permite exibi-las e convertê-las para LaTeX de modo uniforme;
+- ~derivation.rs~:  uma /derivação/ é uma árvore de aplicações de regras: a conclusão é um /julgamento/, e cada nó registra a regra aplicada e as derivações de suas premissas. Serve tanto para avaliação quanto para tipagem, e dela se obtém a ordem pós-fixada das regras e a árvore em LaTeX;
+- ~step.rs~:        um /sistema de transição/: dado um estado, produz no máximo uma transição ~s → s'~ (regra, estado de origem e de destino). Define o /trait/ ~Step~ e o /driver/ genérico ~run~, que itera as transições e termina em um estado final ou /travado/ (/stuck/). É usado pela semântica estrutural (estado = termo) e, futuramente, pelas máquinas abstratas (estado = configuração);
+- ~big_step.rs~:    a semântica natural, com o julgamento ~t ⇓ v~. Define o /trait/ ~BigStep~, cuja avaliação retorna uma derivação completa. Como não há iteração, não há noção de /stuck/: se nenhuma derivação existe, o resultado é um erro;
+- ~machine.rs~:     máquinas abstratas. Define o /trait/ ~Machine~, que estende ~Step~ com ~load~ (termo → configuração inicial) e ~unload~ (configuração final → valor), permitindo verificar a correção de um compilador ou de uma máquina contra a semântica natural; e
+- ~typing.rs~:      o sistema de tipos, com o julgamento ~Γ ⊢ t : T~. Define o /trait/ ~Typing~, cujo resultado é uma derivação de tipagem ou um erro de tipo.
+
+Todos esses módulos /definem/ /traits/ que devem ser implementados por cada uma das linguagens. Outras estratégias aqui seriam possíveis: poderíamos partir de uma linguagem base e expandi-la; entretanto, como nosso foco inicial é implementar todas as linguagens do TAPL, não estamos preocupados com isto, apesar de estarmos tentando abstrair a maior parte possível das técnicas de Semântica Formal e de Teoria das Linguagens de Programação para os módulos do ~core~.
+
+** Julgamentos e resultados
+| /trait/     | julgamento | resultado                         | nenhuma regra se aplica      |
+|-------------+------------+-----------------------------------+------------------------------|
+| ~Step~      | ~t → t'~   | uma transição, iterada por ~run~  | /stuck/ (resultado normal)   |
+| ~Machine~   | ~⟨s⟩ → ⟨s'⟩~ | idem, sobre configurações       | /stuck/ (resultado normal)   |
+| ~BigStep~   | ~t ⇓ v~    | árvore de derivação               | erro (não há derivação)      |
+| ~Typing~    | ~Γ ⊢ t : T~ | árvore de derivação              | erro de tipo                 |
+
+Um termo /travado/ é uma forma normal que não é um valor (TAPL, cap. 3); por isso ~is_final~ e "ser valor" são noções distintas de "não ter passo".
+
+** Organização por linguagem
+Então, por exemplo, para a linguagem ~arith~, teremos
+
+- ~languages/arith/semantics/small_step.rs~:    implementa ~Step~ para ~arith~ (semântica estrutural);
+- ~languages/arith/semantics/big_step.rs~:      implementa ~BigStep~ para ~arith~ (semântica natural);
+- ~languages/arith/semantics/machine.rs~:       implementa ~Machine~ para ~arith~ (posterior); e
+- ~languages/arith/semantics/typing.rs~:        implementa ~Typing~, isto é, o verificador de tipos de ~arith~.
+
+=template=
+#+name:    simple-languages--semantics--{name}--{field}
+#+date:    <2026-09-30>
+#+version: 1.0.0
+#+begin_src rust
+
+#+end_src
+=end=
+
+** implementação
+*** módulo ~core/semantics~
+#+name:    simple-languages--semantics--mod--header  
+#+date:    <2026-09-30>
+#+version: 1.0.0
+#+begin_src rust
+//! `src/common/semantics/mod.rs` ...
+
+pub mod rule;
+
+pub use rule::Rule;
+// pub mod derivation;
+// pub mod step;
+// pub mod big_step;
+// pub mod machine;
+// pub mod typing;
+#+end_src
+
+
+*** ~rule~: regras de infêrencia
+ver: [[file:src/common/rule.rs]]
+
+*** ~derivation~: ...
+ver: [[file:src/common/derivation.rs]]
+
+*** ~step~:
+ver: [[file:src/common/step.rs]]
+
+*** ~big_step~: ...
+ver: [[file:src/common/big_step.rs]]
+
+*** ~machine~: ...
+ver: [[file:src/common/machine.rs]]
+
+*** ~typing~: ...
+ver: [[file:src/common/rules.rs]]
+
