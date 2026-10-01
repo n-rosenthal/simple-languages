@@ -1,20 +1,3 @@
-#+title:    definindo derivações de termos
-#+author:   nícolas rosenthal
-#+date:     \date
-#+version:  1.0.1
-#+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/semantics/derivation.rs 
-
-=fix= ~1.0.1~
-#+begin_quote
-Mudança em semantics/derivation.rs
-
-O Typed tinha um Vec<(String, Ty)> provisório. Troque pela Context. Em cima do arquivo, use use crate::common::context::Context;, e remova ident do use crate::common::latex::{...} (ele passou a ser usado só dentro de context.rs). Depois substitua o bloco do Typed:
-#+end_quote
-
-* /header/
-#+name:    simple-languages--semantics--derivation--header  
-#+date:    <2026-09-30>
-#+begin_src rust
 //! Derivações: árvores de aplicações de regras.
 //!
 //! Uma [`Derivation`] é genérica no julgamento `J` e no conjunto de
@@ -29,13 +12,7 @@ use crate::common::latex::{ident, inference};
 use crate::common::ToLatex;
 
 use super::Rule;
-#+end_src
 
-* implementação
-
-#+name:    simple-languages--semantics--derivation--def
-#+date:    <2026-09-30>
-#+begin_src rust
 // =============================================================================
 // Derivation
 // =============================================================================
@@ -217,13 +194,6 @@ impl<T: ToLatex, Ty: ToLatex> ToLatex for Typed<T, Ty> {
         format!(r"{prefix}\vdash {} : {}", self.term.to_latex(), self.ty.to_latex())
     }
 }
-#+end_src
-
-* testes unitários
-
-#+name:    simple-languages--semantics--derivation--test
-#+date:    <2026-09-30>
-#+begin_src rust
 
 #[cfg(test)]
 mod tests {
@@ -329,4 +299,3 @@ mod tests {
         assert_eq!(open.to_latex(), r"x{:}Bool \vdash x : Bool");
     }
 }
-#+end_src
