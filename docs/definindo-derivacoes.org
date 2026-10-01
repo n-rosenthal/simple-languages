@@ -1,0 +1,338 @@
+#+title:    definindo derivações de termos
+#+author:   nícolas rosenthal
+#+date:     \date
+#+version:  1.0.0
+#+PROPERTY: header-args :tangle ~/org/roam/projects/programming/simple-languages/src/common/semantics/derivation.rs 
+
+* /header/
+#+name:    simple-languages--semantics--derivation--header  
+#+date:    <2026-09-30>
+#+begin_src rust
+//! Derivações: árvores de aplicações de regras.
+//!
+//! Uma [`Derivation`] é genérica no julgamento `J` e no conjunto de
+//! regras `R`, então serve para avaliação (`t ⇓ v`), passos (`t → t'`) e
+//! tipagem (`Γ ⊢ t : T`). Os nomes dos métodos e dos campos
+//! (`conclusion`, `postorder_rules`, `to_latex_step`, `to_latex_tree`)
+//! seguem a derivação atual de `arith`, para facilitar a migração.
+
+use std::fmt::{self, Write};
+
+use crate::common::latex::{ident, inference};
+use crate::common::ToLatex;
+
+use super::Rule;
+#+end_src
+
+* implementação
+
+#+name:    simple-languages--semantics--derivation--def
+#+date:    <2026-09-30>
+#+begin_src rust
+// =============================================================================
+// Derivation
+// =============================================================================
+
+/// `premissas / conclusão`, com o nome da regra aplicada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Derivation<J, R> {
+    pub conclusion: J,
+    pub rule: R,
+    pub premises: Vec<Derivation<J, R>>,
+}
+
+impl<J, R> Derivation<J, R> {
+    /// Uma regra sem premissas (um axioma).
+    pub fn axiom(conclusion: J, rule: R) -> Self {
+        Self { conclusion, rule, premises: Vec::new() }
+    }
+
+    /// Uma regra com premissas.
+    pub fn node(conclusion: J, rule: R, premises: Vec<Derivation<J, R>>) -> Self {
+        Self { conclusion, rule, premises }
+    }
+
+    pub fn is_axiom(&self) -> bool {
+        self.premises.is_empty()
+    }
+
+    /// Número de aplicações de regra na árvore.
+    pub fn size(&self) -> usize {
+        1 + self.premises.iter().map(Self::size).sum::<usize>()
+    }
+
+    /// Altura da árvore (um axioma tem altura 1).
+    pub fn height(&self) -> usize {
+        1 + self.premises.iter().map(Self::height).max().unwrap_or(0)
+    }
+}
+
+impl<J, R: Rule> Derivation<J, R> {
+    /// Regras em pós-ordem: premissas da esquerda para a direita, depois a
+    /// regra da conclusão.
+    pub fn postorder_rules(&self) -> Vec<R> {
+        let mut rules = Vec::with_capacity(self.size());
+        self.collect_postorder(&mut rules);
+        rules
+    }
+
+    fn collect_postorder(&self, out: &mut Vec<R>) {
+        for premise in &self.premises {
+            premise.collect_postorder(out);
+        }
+        out.push(self.rule);
+    }
+}
+
+impl<J: ToLatex, R: Rule> Derivation<J, R> {
+    /// Só o último passo: as conclusões das premissas sobre a conclusão.
+    pub fn to_latex_step(&self) -> String {
+        let premises: Vec<String> = self
+            .premises
+            .iter()
+            .map(|p| p.conclusion.to_latex())
+            .collect();
+
+        inference(&premises, &self.conclusion.to_latex(), &self.rule.to_latex())
+    }
+
+    /// A árvore completa, com as subderivações aninhadas.
+    pub fn to_latex_tree(&self) -> String {
+        let premises: Vec<String> =
+            self.premises.iter().map(Self::to_latex_tree).collect();
+
+        inference(&premises, &self.conclusion.to_latex(), &self.rule.to_latex())
+    }
+}
+
+impl<J: fmt::Display, R: Rule> Derivation<J, R> {
+    /// A árvore em texto, uma regra por linha, com recuo por profundidade.
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        self.write_text(&mut out, 0);
+        out
+    }
+
+    fn write_text(&self, out: &mut String, depth: usize) {
+        let _ = writeln!(
+            out,
+            "{}{}  [{}]",
+            "  ".repeat(depth),
+            self.conclusion,
+            self.rule
+        );
+        for premise in &self.premises {
+            premise.write_text(out, depth + 1);
+        }
+    }
+}
+
+// =============================================================================
+// Julgamentos
+// =============================================================================
+
+/// `t ⇓ v` (semântica natural).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Eval<T, V> {
+    pub term: T,
+    pub value: V,
+}
+
+impl<T: fmt::Display, V: fmt::Display> fmt::Display for Eval<T, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ⇓ {}", self.term, self.value)
+    }
+}
+
+impl<T: ToLatex, V: ToLatex> ToLatex for Eval<T, V> {
+    fn to_latex(&self) -> String {
+        format!(r"{} \Downarrow {}", self.term.to_latex(), self.value.to_latex())
+    }
+}
+
+/// `t → t'` (um passo da semântica estrutural).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reduces<T> {
+    pub from: T,
+    pub to: T,
+}
+
+impl<T: fmt::Display> fmt::Display for Reduces<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} → {}", self.from, self.to)
+    }
+}
+
+impl<T: ToLatex> ToLatex for Reduces<T> {
+    fn to_latex(&self) -> String {
+        format!(r"{} \to {}", self.from.to_latex(), self.to.to_latex())
+    }
+}
+
+/// `Γ ⊢ t : T` (tipagem). O contexto é uma lista de bindings, o mais
+/// recente por último; vazio para termos fechados. Trocar por um
+/// `Context<B>` do core quando ele existir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typed<T, Ty> {
+    pub context: Vec<(String, Ty)>,
+    pub term: T,
+    pub ty: Ty,
+}
+
+impl<T, Ty> Typed<T, Ty> {
+    /// Julgamento sobre um termo fechado (Γ vazio), como em `arith`.
+    pub fn closed(term: T, ty: Ty) -> Self {
+        Self { context: Vec::new(), term, ty }
+    }
+}
+
+impl<T: fmt::Display, Ty: fmt::Display> fmt::Display for Typed<T, Ty> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, (name, ty)) in self.context.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{name}:{ty}")?;
+        }
+        if !self.context.is_empty() {
+            write!(f, " ")?;
+        }
+        write!(f, "⊢ {} : {}", self.term, self.ty)
+    }
+}
+
+impl<T: ToLatex, Ty: ToLatex> ToLatex for Typed<T, Ty> {
+    fn to_latex(&self) -> String {
+        let context = self
+            .context
+            .iter()
+            .map(|(name, ty)| format!("{}{{:}}{}", ident(name), ty.to_latex()))
+            .collect::<Vec<_>>()
+            .join(r",\,");
+
+        let prefix = if context.is_empty() {
+            String::new()
+        } else {
+            format!("{context} ")
+        };
+
+        format!(r"{prefix}\vdash {} : {}", self.term.to_latex(), self.ty.to_latex())
+    }
+}
+#+end_src
+
+* testes unitários
+
+#+name:    simple-languages--semantics--derivation--test
+#+date:    <2026-09-30>
+#+begin_src rust
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    crate::rules! {
+        enum TestRule {
+            Int => "E-Int",
+            Add => "E-Add",
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct S(&'static str);
+
+    impl fmt::Display for S {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl ToLatex for S {
+        fn to_latex(&self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    fn eval(t: &'static str, v: &'static str) -> Eval<S, S> {
+        Eval { term: S(t), value: S(v) }
+    }
+
+    /// 1 + 2 ⇓ 3, com as duas premissas `1 ⇓ 1` e `2 ⇓ 2`.
+    fn sample() -> Derivation<Eval<S, S>, TestRule> {
+        Derivation::node(
+            eval("1+2", "3"),
+            TestRule::Add,
+            vec![
+                Derivation::axiom(eval("1", "1"), TestRule::Int),
+                Derivation::axiom(eval("2", "2"), TestRule::Int),
+            ],
+        )
+    }
+
+    #[test]
+    fn size_and_height() {
+        let d = sample();
+        assert_eq!(d.size(), 3);
+        assert_eq!(d.height(), 2);
+        assert!(!d.is_axiom());
+        assert!(d.premises[0].is_axiom());
+        assert_eq!(d.premises[0].height(), 1);
+    }
+
+    #[test]
+    fn postorder_visits_premises_first() {
+        assert_eq!(
+            sample().postorder_rules(),
+            vec![TestRule::Int, TestRule::Int, TestRule::Add]
+        );
+    }
+
+    #[test]
+    fn latex_step_shows_only_the_last_inference() {
+        assert_eq!(
+            sample().to_latex_step(),
+            r"\inferrule*[right=\textsc{E-Add}]{1 \Downarrow 1 \\ 2 \Downarrow 2}{1+2 \Downarrow 3}"
+        );
+    }
+
+    #[test]
+    fn latex_tree_nests_subderivations() {
+        let axiom = r"\inferrule*[right=\textsc{E-Int}]{}{1 \Downarrow 1}";
+        let tree = sample().to_latex_tree();
+
+        assert!(tree.contains(axiom));
+        assert!(tree.starts_with(r"\inferrule*[right=\textsc{E-Add}]{"));
+        assert!(tree.ends_with(r"}{1+2 \Downarrow 3}"));
+    }
+
+    #[test]
+    fn text_rendering_indents_by_depth() {
+        assert_eq!(
+            sample().to_text(),
+            "1+2 ⇓ 3  [E-Add]\n  1 ⇓ 1  [E-Int]\n  2 ⇓ 2  [E-Int]\n"
+        );
+    }
+
+    #[test]
+    fn reduces_judgment() {
+        let j = Reduces { from: S("a"), to: S("b") };
+        assert_eq!(j.to_string(), "a → b");
+        assert_eq!(j.to_latex(), r"a \to b");
+    }
+
+    #[test]
+    fn typed_judgment_with_and_without_context() {
+        let closed = Typed::closed(S("x"), S("Bool"));
+        assert_eq!(closed.to_string(), "⊢ x : Bool");
+        assert_eq!(closed.to_latex(), r"\vdash x : Bool");
+
+        let open = Typed {
+            context: vec![("x".to_string(), S("Bool"))],
+            term: S("x"),
+            ty: S("Bool"),
+        };
+        assert_eq!(open.to_string(), "x:Bool ⊢ x : Bool");
+        assert_eq!(open.to_latex(), r"x{:}Bool \vdash x : Bool");
+    }
+}
+#+end_src

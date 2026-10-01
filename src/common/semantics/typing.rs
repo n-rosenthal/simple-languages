@@ -1,0 +1,41 @@
+//! O sistema de tipos: o julgamento `Γ ⊢ t : T`.
+//!
+//! Cada linguagem implementa [`Typing`]. O resultado de uma checagem
+//! bem-sucedida é uma [`Derivation`] completa, não só o tipo: a ordem
+//! pós-fixada das regras e a árvore em LaTeX saem dela.
+//!
+//! Se nenhuma derivação existe, o resultado é um erro de tipo. Isso é o
+//! oposto da semântica estrutural, em que "nenhuma regra se aplica" é um
+//! resultado normal (um termo travado).
+
+use super::derivation::{Derivation, Typed};
+use super::Rule;
+
+/// A derivação de tipagem de uma linguagem `T`.
+pub type TypingDerivation<T> = Derivation<
+    Typed<<T as Typing>::Term, <T as Typing>::Type>,
+    <T as Typing>::Rule,
+>;
+
+pub trait Typing {
+    type Term: Clone;
+    type Type: Clone;
+    type Rule: Rule;
+    type Error: std::error::Error;
+
+    /// Deriva `⊢ t : T` para um termo fechado (Γ vazio).
+    ///
+    /// Linguagens com contexto mantêm um `check_in` próprio, que empilha
+    /// e desempilha bindings, e chamam-no a partir daqui com Γ vazio.
+    fn check(term: &Self::Term) -> Result<TypingDerivation<Self>, Self::Error>;
+
+    /// Só o tipo, descartando a derivação.
+    fn type_of(term: &Self::Term) -> Result<Self::Type, Self::Error> {
+        Self::check(term).map(|derivation| derivation.conclusion.ty)
+    }
+
+    /// O termo é bem tipado?
+    fn is_well_typed(term: &Self::Term) -> bool {
+        Self::check(term).is_ok()
+    }
+}

@@ -1,4 +1,4 @@
-//! `src/common/rules.rs`: 
+//! `src/common/semantics/rules.rs`: 
 //! Regras de inferência.
 //!
 //! Uma regra é um /nome/ (`E-IfTrue`, `T-Abs`, ...) que aparece em
@@ -14,7 +14,7 @@ use std::fmt;
 
 
 /// temp
-// use crate::common::ToLatex;
+use crate::common::ToLatex;
 
 /// Gera uma enum de regras com `Rule`, `Display` e `ToLatex`.
 ///
