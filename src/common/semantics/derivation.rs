@@ -2,13 +2,12 @@
 //!
 //! Uma [`Derivation`] é genérica no julgamento `J` e no conjunto de
 //! regras `R`, então serve para avaliação (`t ⇓ v`), passos (`t → t'`) e
-//! tipagem (`Γ ⊢ t : T`). Os nomes dos métodos e dos campos
-//! (`conclusion`, `postorder_rules`, `to_latex_step`, `to_latex_tree`)
-//! seguem a derivação atual de `arith`, para facilitar a migração.
+//! tipagem (`Γ ⊢ t : T`).
 
 use std::fmt::{self, Write};
 
-use crate::common::latex::{ident, inference};
+use crate::common::context::Context;
+use crate::common::latex::inference;
 use crate::common::ToLatex;
 
 use super::Rule;
@@ -153,8 +152,7 @@ impl<T: ToLatex> ToLatex for Reduces<T> {
     }
 }
 
-/// `Γ ⊢ t : T` (tipagem). O contexto é uma lista de bindings, o mais
-/// recente por último; vazio para termos fechados.
+/// `Γ ⊢ t : T` (tipagem). Γ vazio para termos fechados.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Typed<T, Ty> {
     pub context: Context<Ty>,
@@ -162,13 +160,12 @@ pub struct Typed<T, Ty> {
     pub ty: Ty,
 }
 
-
 impl<T, Ty> Typed<T, Ty> {
     pub fn new(context: Context<Ty>, term: T, ty: Ty) -> Self {
         Self { context, term, ty }
     }
 
-    /// Julgamento sobre um termo fechado (Γ vazio), como em `arith`.
+    /// Julgamento sobre um termo fechado (Γ vazio).
     pub fn closed(term: T, ty: Ty) -> Self {
         Self::new(Context::empty(), term, ty)
     }

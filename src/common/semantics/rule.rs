@@ -1,4 +1,3 @@
-//! `src/common/semantics/rules.rs`: 
 //! Regras de inferência.
 //!
 //! Uma regra é um /nome/ (`E-IfTrue`, `T-Abs`, ...) que aparece em
@@ -9,12 +8,18 @@
 //! enum, `Display` e `ToLatex` a partir de uma única tabela, de modo que
 //! cada nome de regra seja escrito uma só vez.
 
-/// uses `...`
 use std::fmt;
 
-
-/// temp
 use crate::common::ToLatex;
+
+/// Uma regra de inferência identificada por nome.
+///
+/// `Copy` porque, em TAPL, regras são apenas nomes; se alguma linguagem
+/// precisar de regras com dados associados, relaxe para `Clone`.
+pub trait Rule: Copy + Eq + fmt::Debug + fmt::Display + ToLatex {
+    /// Nome da regra na notação do livro, por exemplo `"E-IfTrue"`.
+    fn name(&self) -> &'static str;
+}
 
 /// Gera uma enum de regras com `Rule`, `Display` e `ToLatex`.
 ///
@@ -24,7 +29,6 @@ use crate::common::ToLatex;
 ///     pub enum TypingRule {
 ///         /// x : T ∈ Γ
 ///         Var => "T-Var",
-///         /// Γ, x:T1 ⊢ t : T2  ⟹  Γ ⊢ λx:T1. t : T1 → T2
 ///         Abs => "T-Abs",
 ///         App => "T-App",
 ///     }
@@ -78,7 +82,6 @@ macro_rules! rules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::ToLatex;
 
     crate::rules! {
         /// Conjunto de regras de brinquedo para testar a macro.

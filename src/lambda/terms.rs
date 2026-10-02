@@ -1,49 +1,31 @@
-//! `simple-languages/lambda/terms.rs` defines the term types for the lambda calculus language. 
-//! 
-//! The `Term` type is defined in `simple-languages/lambda/types.rs`.
-//! 
-//! Author:     n-rosenthal
-//! Date:       2026-10-01
-//! Version:    0.1.1
-
+use std::collections::BTreeSet;
 use std::fmt;
 
-use std::collections::BTreeSet;
+use super::types::Type;
 
-//  ===
-//  Term
-//  ===
-
-/// Terms for the simply typed lambda calculus language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
-    /// Variable.
+    /// `x`
     Var(String),
-
-    /// Lambda abstraction.
-    Lambda {
-        /// Parameter of the lambda abstraction.
-        param: String,
-
-        /// Body of the lambda abstraction.
-        body: Box<Term>,
-    },
-
-    /// Application.
-    App(Box<Term>, Box<Term>),
-}
-
-impl fmt::Display for Term {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Var(name) => write!(f, "{}", name),
-            Self::Lambda { param, body } => write!(f, "λ{}.{body}", param),
-            Self::App(lhs, rhs) => write!(f, "({lhs} {rhs})"),
-        }
-    }
+    /// `λx:T. body`
+    Lambda { param: String, ty: Type, body: Box<Term> },
+    /// `f x`
+    App { func: Box<Term>, arg: Box<Term> },
 }
 
 impl Term {
+    pub fn variable(name: impl Into<String>) -> Self {
+        Self::Var(name.into())
+    }
+
+    pub fn lambda(param: impl Into<String>, ty: Type, body: Term) -> Self {
+        Self::Lambda { param: param.into(), ty, body: Box::new(body) }
+    }
+
+    pub fn app(func: Term, arg: Term) -> Self {
+        Self::App { func: Box::new(func), arg: Box::new(arg) }
+    }
+
     /// Valores: as abstrações.
     pub fn is_value(&self) -> bool {
         matches!(self, Term::Lambda { .. })
@@ -149,6 +131,28 @@ fn fresh_name(base: &str, avoid: &BTreeSet<String>) -> String {
         .expect("infinite iterator")
 }
 
+impl fmt::Display for Term {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Var(x) => write!(f, "{x}"),
+            Self::Lambda { param, ty, body } => write!(f, "λ{param}:{ty}. {body}"),
+            Self::App { func, arg } => {
+                // Aplicação é associativa à esquerda: só uma abstração à
+                // esquerda precisa de parênteses.
+                match **func {
+                    Term::Lambda { .. } => write!(f, "({func})")?,
+                    _ => write!(f, "{func}")?,
+                }
+                write!(f, " ")?;
+                match **arg {
+                    Term::Var(_) => write!(f, "{arg}"),
+                    _ => write!(f, "({arg})"),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::lambda::testing::parse;
@@ -191,5 +195,3 @@ mod tests {
         assert!(!parse("λx:A. z").alpha_eq(&parse("λx:A. w"))); // livres diferentes
     }
 }
-
-// EOF

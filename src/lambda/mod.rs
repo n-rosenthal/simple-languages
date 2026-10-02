@@ -1,3 +1,5 @@
+//! O cálculo λ simplesmente tipado (TAPL, caps. 5 e 9).
+
 pub mod lexer;
 pub mod scanner;
 pub mod token;
@@ -8,17 +10,19 @@ pub mod typing;
 pub mod small_step;
 pub mod big_step;
 pub mod compile;
+pub mod language;
 mod latex_impls;
 
-pub use lexer::LambdaLexer;
-pub use scanner::LambdaScanner;
-pub use parser::LambdaParser;
-pub use terms::Term;
-pub use types::Type;
-pub use typing::{LambdaTyping, TypeError, TypingRule};
-pub use small_step::{LambdaSmallStep, StepRule};
 pub use big_step::{EvalError, EvalRule, LambdaBigStep};
 pub use compile::{CompileError, LambdaCompiler};
+pub use language::{Lambda, SyntaxError};
+pub use lexer::LambdaLexer;
+pub use parser::LambdaParser;
+pub use scanner::LambdaScanner;
+pub use small_step::{LambdaSmallStep, StepRule};
+pub use terms::Term;
+pub use typing::{LambdaTyping, TypeError, TypingRule};
+pub use types::Type;
 
 /// Termos de exemplo compartilhados pelos testes de `lambda`.
 #[cfg(test)]
@@ -44,7 +48,7 @@ pub(crate) mod testing {
     ];
 
     /// Mal tipados ou abertos, mas que terminam: variáveis livres
-    /// (travam), um erro de tipo que mesmo assim avalia, e uma captura.
+    /// (travam), erros de tipo que mesmo assim avaliam, e uma captura.
     pub const OTHERS: &[&str] = &[
         "x",
         "x y",
@@ -62,9 +66,8 @@ pub(crate) mod testing {
 mod laws {
     use super::testing::{all, parse, WELL_TYPED};
     use super::*;
-    use crate::common::machine_language::compilation_is_correct;
-    use crate::common::semantics::laws::*;
-    use crate::common::semantics::{run, Typing};
+    use crate::common::language::law_violations;
+    use crate::common::semantics::Typing;
 
     #[test]
     fn the_well_typed_samples_are_well_typed() {
@@ -74,54 +77,10 @@ mod laws {
     }
 
     #[test]
-    fn final_states_do_not_step() {
+    fn every_law_holds_on_every_sample() {
         for t in all() {
-            assert!(final_states_do_not_step::<LambdaSmallStep>(&t), "{t}");
-        }
-    }
-
-    #[test]
-    fn traces_are_connected() {
-        for t in all() {
-            assert!(trace_is_connected(&run::<LambdaSmallStep>(t.clone())), "{t}");
-        }
-    }
-
-    #[test]
-    fn small_step_agrees_with_big_step() {
-        for t in all() {
-            assert!(
-                small_step_agrees_with_big_step::<LambdaSmallStep, LambdaBigStep>(&t),
-                "{t}"
-            );
-        }
-    }
-
-    #[test]
-    fn well_typed_terms_evaluate() {
-        for t in all() {
-            assert!(well_typed_evaluates::<LambdaTyping, LambdaBigStep>(&t), "{t}");
-        }
-    }
-
-    #[test]
-    fn progress() {
-        for t in all() {
-            assert!(well_typed_never_gets_stuck::<LambdaTyping, LambdaSmallStep>(&t), "{t}");
-        }
-    }
-
-    #[test]
-    fn preservation_holds() {
-        for t in all() {
-            assert!(preservation::<LambdaTyping, LambdaSmallStep>(&t), "{t}");
-        }
-    }
-
-    #[test]
-    fn compilation_is_correct_for_lambda() {
-        for t in all() {
-            assert!(compilation_is_correct::<LambdaCompiler, LambdaBigStep>(&t), "{t}");
+            let violated = law_violations::<Lambda>(&t);
+            assert!(violated.is_empty(), "{t}: {violated:?}");
         }
     }
 }

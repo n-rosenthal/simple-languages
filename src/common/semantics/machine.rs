@@ -1,161 +1,116 @@
-use super::machine::Machine;
-use super::step::{Step, Transition};
+//! Máquinas abstratas.
+//!
+//! Uma máquina é um [`Step`] cujo estado é uma *configuração* (código,
+//! pilha, ambiente, memória, ...) em vez de um termo. [`Machine`] só
+//! acrescenta a ponte entre os dois mundos:
+//!
+//! - [`Machine::load`]: termo → configuração inicial (a "compilação");
+//! - [`Machine::unload`]: configuração final → valor.
+//!
+//! Com isso é possível verificar a correção da máquina contra a semântica
+//! natural (ver `laws::machine_agrees_with_big_step`).
+//!
+//! Máquinas com referências (cap. 13) guardam uma [`crate::common::Store`]
+//! dentro do próprio estado.
 
-impl From<Value> for Term {
-    fn from(v: Value) -> Term {
-        match v {
-            Value::Num(n) => Term::Num(n),
-            Value::Bool(b) => Term::Bool(b),
-        }
-    }
+use super::step::{run_with_fuel, Step, Trace, DEFAULT_FUEL};
+
+/// O resultado de executar um termo em uma máquina.
+pub struct Execution<M: Machine> {
+    pub trace: Trace<M>,
+    /// `Some` só se a execução terminou em um estado final do qual
+    /// `unload` extrai um valor.
+    pub value: Option<M::Value>,
 }
 
-// --- small-step -------------------------------------------------------------
+pub trait Machine: Step {
+    type Term;
+    type Value;
 
-crate::rules! {
-    pub enum StepRule {
-        AddLeft => "E-Add1",
-        AddRight => "E-Add2",
-        AddCompute => "E-AddConst",
-    }
-}
+    /// A configuração inicial para `term`.
+    fn load(term: &Self::Term) -> Self::State;
 
-pub struct ToySmallStep;
+    /// O valor de uma configuração final. `None` para uma configuração
+    /// que não é final, ou final mas malformada (pilha com sobras, por
+    /// exemplo, que normalmente indica um erro na máquina).
+    fn unload(state: &Self::State) -> Option<Self::Value>;
 
-impl Step for ToySmallStep {
-    type State = Term;
-    type Rule = StepRule;
-
-    fn is_final(term: &Term) -> bool {
-        matches!(term, Term::Num(_) | Term::Bool(_))
-    }
-
-    fn step(term: &Term) -> Option<Transition<StepRule, Term>> {
-        let Term::Add(l, r) = term else { return None };
-
-        if !Self::is_final(l) {
-            let inner = Self::step(l)?;
-            let next = add(inner.to, (**r).clone());
-            return Some(Transition::new(StepRule::AddLeft, term.clone(), next));
-        }
-
-        if !Self::is_final(r) {
-            let inner = Self::step(r)?;
-            let next = add((**l).clone(), inner.to);
-            return Some(Transition::new(StepRule::AddRight, term.clone(), next));
-        }
-
-        match (&**l, &**r) {
-            (Term::Num(a), Term::Num(b)) => {
-                Some(Transition::new(StepRule::AddCompute, term.clone(), Term::Num(a + b)))
-            }
-            _ => None, // travado: `true + 1`
-        }
-    }
-}
-
-// --- máquina de pilha -------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Instr {
-    Push(Value),
-    Add,
-}
-
-impl fmt::Display for Instr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Instr::Push(v) => write!(f, "push {v}"),
-            Instr::Add => f.write_str("add"),
-        }
-    }
-}
-
-crate::rules! {
-    pub enum MachineRule {
-        Push => "M-Push",
-        Add => "M-Add",
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MachineState {
-    pub code: Vec<Instr>,
-    pub stack: Vec<Value>,
-}
-
-impl fmt::Display for MachineState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let join = |items: Vec<String>| items.join("; ");
-        write!(
-            f,
-            "⟨[{}], [{}]⟩",
-            join(self.code.iter().map(|i| i.to_string()).collect()),
-            join(self.stack.iter().map(|v| v.to_string()).collect()),
-        )
-    }
-}
-
-pub struct ToyMachine;
-
-fn compile(term: &Term, out: &mut Vec<Instr>) {
-    match term {
-        Term::Num(n) => out.push(Instr::Push(Value::Num(*n))),
-        Term::Bool(b) => out.push(Instr::Push(Value::Bool(*b))),
-        Term::Add(l, r) => {
-            compile(l, out);
-            compile(r, out);
-            out.push(Instr::Add);
-        }
-    }
-}
-
-impl Step for ToyMachine {
-    type State = MachineState;
-    type Rule = MachineRule;
-
-    fn is_final(state: &MachineState) -> bool {
-        state.code.is_empty()
+    /// Carrega `term`, executa e extrai o valor.
+    fn execute(term: &Self::Term) -> Execution<Self>
+    where
+        Self: Sized,
+    {
+        Self::execute_with_fuel(term, DEFAULT_FUEL)
     }
 
-    fn step(state: &MachineState) -> Option<Transition<MachineRule, MachineState>> {
-        let (first, rest) = state.code.split_first()?;
-        let mut stack = state.stack.clone();
+    fn execute_with_fuel(term: &Self::Term, fuel: usize) -> Execution<Self>
+    where
+        Self: Sized,
+    {
+        let trace = run_with_fuel::<Self>(Self::load(term), fuel);
 
-        let rule = match first {
-            Instr::Push(v) => {
-                stack.push(*v);
-                MachineRule::Push
-            }
-            Instr::Add => {
-                let (b, a) = (stack.pop()?, stack.pop()?); // pilha vazia: travado
-                match (a, b) {
-                    (Value::Num(x), Value::Num(y)) => stack.push(Value::Num(x + y)),
-                    _ => return None, // operandos incompatíveis: travado
-                }
-                MachineRule::Add
-            }
+        let value = if trace.is_final() {
+            Self::unload(&trace.final_state)
+        } else {
+            None
         };
 
-        let next = MachineState { code: rest.to_vec(), stack };
-        Some(Transition::new(rule, state.clone(), next))
+        Execution { trace, value }
     }
 }
 
-impl Machine for ToyMachine {
-    type Term = Term;
-    type Value = Value;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::semantics::toy::*;
 
-    fn load(term: &Term) -> MachineState {
-        let mut code = Vec::new();
-        compile(term, &mut code);
-        MachineState { code, stack: Vec::new() }
+    #[test]
+    fn load_compiles_to_postfix_code() {
+        let state = ToyMachine::load(&add(num(1), num(2)));
+
+        assert_eq!(
+            state.code,
+            vec![Instr::Push(Value::Num(1)), Instr::Push(Value::Num(2)), Instr::Add]
+        );
+        assert!(state.stack.is_empty());
     }
 
-    fn unload(state: &MachineState) -> Option<Value> {
-        match (state.code.is_empty(), state.stack.as_slice()) {
-            (true, [only]) => Some(*only),
-            _ => None,
-        }
+    #[test]
+    fn executes_to_a_value() {
+        let run = ToyMachine::execute(&add(num(1), num(2)));
+
+        assert_eq!(run.value, Some(Value::Num(3)));
+        assert!(run.trace.is_final());
+        assert_eq!(
+            run.trace.rules(),
+            vec![MachineRule::Push, MachineRule::Push, MachineRule::Add]
+        );
+    }
+
+    #[test]
+    fn a_literal_is_one_push() {
+        let run = ToyMachine::execute(&num(7));
+        assert_eq!(run.value, Some(Value::Num(7)));
+        assert_eq!(run.trace.len(), 1);
+    }
+
+    #[test]
+    fn ill_typed_code_gets_stuck() {
+        let run = ToyMachine::execute(&add(num(1), boolean(true)));
+
+        assert!(run.trace.is_stuck());
+        assert_eq!(run.value, None);
+    }
+
+    #[test]
+    fn unload_rejects_non_final_configurations() {
+        let initial = ToyMachine::load(&add(num(1), num(2)));
+        assert_eq!(ToyMachine::unload(&initial), None);
+    }
+
+    #[test]
+    fn the_trace_renders_configurations() {
+        let run = ToyMachine::execute(&num(1));
+        assert_eq!(run.trace.to_text(), "⟨[push 1], []⟩\n→ ⟨[], [1]⟩  [M-Push]\n");
     }
 }

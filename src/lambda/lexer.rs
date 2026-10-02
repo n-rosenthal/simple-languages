@@ -1,31 +1,29 @@
-//! `simple-languages/common/lexer.rs` defines a lexer for the lambda calculus language.
-//! 
-//! author:  n-rosenthal
-//! date:    2026-09-28
-//! version: 0.1.0
-//! 
-//! This module provides a lexer for the lambda calculus language, which is responsible for converting a string of source code into a sequence of tokens that can be further processed by a parser. The lexer recognizes the following tokens:
-//! (1.) variables (identifiers): ASCII strings that start with a letter and can contain letters, digits, and underscores;
-//! (2.) lambda abstraction: the keyword "λ";
-//! (3.) dot: the character ".";
-//! (4.) parentheses: the characters "(" and ")";
-//! (5.) whitespace: spaces, tabs, and newlines, which are ignored by the lexer.
-//! 
-//! The lexer also returns errors when it encounters unexpected characters or missing tokens.
+//! Lexer da linguagem `lambda` (cálculo λ simplesmente tipado).
 //!
+//! Tokens reconhecidos:
+//!
+//! 1. identificadores: uma letra ASCII seguida de letras, dígitos ou `_`
+//!    (variáveis e nomes de tipos base);
+//! 2. abstração: `λ` ou `\`;
+//! 3. ponto `.`, dois-pontos `:` e seta `->`;
+//! 4. parênteses `(` e `)`;
+//! 5. espaço em branco, ignorado.
+//!
+//! As posições (`Span`) contam `char`s, não bytes: `λ` ocupa 2 bytes em
+//! UTF-8, mas é uma posição.
 
 use std::fmt;
 
 use crate::common::{Lexer, SourceLine, Span};
 
 use super::token::{LambdaToken, LambdaTokenType};
-use super::scanner::LambdaScanner;
 
-/// Errors produced by the lexer.
+/// Erros produzidos pelo lexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexError {
     UnexpectedCharacter { character: char, span: Span },
-    /// A multi-character operator that was started but not finished (`-` without `>`).
+    /// Um operador de vários caracteres que começou e não terminou
+    /// (`-` sem `>`).
     UnexpectedEndOfOperator { span: Span },
 }
 
@@ -63,9 +61,7 @@ impl LambdaLexer {
         c.is_ascii_alphanumeric() || c == '_'
     }
 
-    fn tokenize_line(
-        line: &SourceLine,
-    ) -> Result<Vec<LambdaToken>, LexError> {
+    fn tokenize_line(line: &SourceLine) -> Result<Vec<LambdaToken>, LexError> {
         let chars: Vec<char> = line.text.chars().collect();
 
         let mut tokens = Vec::new();
@@ -74,7 +70,7 @@ impl LambdaLexer {
         while index < chars.len() {
             let character = chars[index];
 
-            // Whitespace
+            // Espaço em branco
             if character.is_whitespace() {
                 index += 1;
                 continue;
@@ -82,12 +78,10 @@ impl LambdaLexer {
 
             let start = index;
 
-            // Identifier: letter (letter | digit | '_')*
+            // Identificador: letra (letra | dígito | '_')*
             if Self::is_identifier_start(character) {
                 index += 1;
-                while index < chars.len()
-                    && Self::is_identifier_continue(chars[index])
-                {
+                while index < chars.len() && Self::is_identifier_continue(chars[index]) {
                     index += 1;
                 }
 
@@ -100,7 +94,7 @@ impl LambdaLexer {
                 continue;
             }
 
-            // Arrow: '->'  (a lone '-' is an unfinished operator)
+            // Seta: '->' (um '-' sozinho é um operador incompleto)
             if character == '-' {
                 if index + 1 < chars.len() && chars[index + 1] == '>' {
                     index += 2;
@@ -117,13 +111,13 @@ impl LambdaLexer {
                 });
             }
 
-            // Single-character tokens
+            // Tokens de um caractere
             let kind = match character {
                 'λ' | '\\' => Some(LambdaTokenType::Lambda),
                 '.' => Some(LambdaTokenType::Dot),
                 ':' => Some(LambdaTokenType::Colon),
-                '(' => Some(LambdaTokenType::LeftParen),
-                ')' => Some(LambdaTokenType::RightParen),
+                '(' => Some(LambdaTokenType::LParen),
+                ')' => Some(LambdaTokenType::RParen),
                 _ => None,
             };
 
@@ -137,7 +131,7 @@ impl LambdaLexer {
                 continue;
             }
 
-            // Unknown character
+            // Caractere desconhecido
             return Err(LexError::UnexpectedCharacter {
                 character,
                 span: Span::new(start, start + 1),
@@ -171,7 +165,7 @@ impl Lexer for LambdaLexer {
 mod tests {
     use super::*;
     use crate::common::Scanner;
-    // assumes a LambdaScanner analogous to ArithScanner
+    use crate::lambda::scanner::LambdaScanner;
 
     fn kinds(source: &str) -> Vec<LambdaTokenType> {
         let lines = LambdaScanner::scan(source).unwrap();
@@ -194,8 +188,8 @@ mod tests {
         assert_eq!(
             kinds("λx:Bool->Bool. (f x)"),
             vec![
-                Lambda, Identifier, Colon, Identifier, Arrow, Identifier,
-                Dot, LeftParen, Identifier, Identifier, RightParen,
+                Lambda, Identifier, Colon, Identifier, Arrow, Identifier, Dot, LParen,
+                Identifier, Identifier, RParen,
             ]
         );
     }
@@ -221,5 +215,38 @@ mod tests {
             LambdaLexer::analyze(&lines),
             Err(LexError::UnexpectedCharacter { character: '#', .. })
         ));
+    }
+
+    #[test]
+    fn empty_input_yields_no_tokens() {
+        assert!(kinds("").is_empty());
+        assert!(kinds("   \t ").is_empty());
+    }
+
+    #[test]
+    fn spans_are_char_offsets() {
+        let lines = LambdaScanner::scan("λx.x").unwrap();
+        let tokens = LambdaLexer::analyze(&lines).unwrap();
+        let spans: Vec<_> = tokens.iter().map(|t| (t.span.start, t.span.end)).collect();
+        assert_eq!(spans, vec![(0, 1), (1, 2), (2, 3), (3, 4)]);
+    }
+
+    #[test]
+    fn lexemes_are_preserved() {
+        let lines = LambdaScanner::scan("λfoo_1:Nat->Nat. foo_1").unwrap();
+        let tokens = LambdaLexer::analyze(&lines).unwrap();
+        assert_eq!(tokens[1].lexeme, "foo_1");
+        assert_eq!(tokens[4].lexeme, "->");
+    }
+
+    #[test]
+    fn multiple_lines() {
+        assert_eq!(kinds("λx.x\n(y)").len(), 4 + 3);
+    }
+
+    #[test]
+    fn identifier_cannot_start_with_underscore() {
+        let lines = LambdaScanner::scan("_x").unwrap();
+        assert!(LambdaLexer::analyze(&lines).is_err());
     }
 }

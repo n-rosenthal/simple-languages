@@ -1,18 +1,20 @@
+//! Os traits de semântica: regras, derivações, passos, big-step,
+//! máquinas e tipagem. Cada linguagem os implementa.
 
-
-//! `src/common/semantics/mod.rs` ...
 pub mod rule;
 pub mod derivation;
-pub mod typing;
+pub mod step;
 pub mod big_step;
+pub mod machine;
+pub mod typing;
 pub mod laws;
-// pub mod step;
-// pub mod machine;
 
 #[cfg(test)]
 pub(crate) mod toy;
 
-pub use rule::Rule;
-pub use derivation::{Derivation, Eval, Reduces, Typed};
-pub use typing::{Typing, TypingDerivation};
 pub use big_step::{BigStep, EvalDerivation};
+pub use derivation::{Derivation, Eval, Reduces, Typed};
+pub use machine::{Execution, Machine};
+pub use rule::Rule;
+pub use step::{run, run_with_fuel, steps, Outcome, Step, Trace, Transition, DEFAULT_FUEL};
+pub use typing::{NoTyping, NoTypingRule, Typing, TypingDerivation, Untyped};

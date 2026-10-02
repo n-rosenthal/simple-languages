@@ -57,10 +57,51 @@ pub trait Typing {
 }
 #+end_src
 
-# * testes unitários
+* linguages não-tipadas
 
-# #+name:    simple-languages--semantics--typing--test
-# #+date:    <2026-09-30>
-# #+begin_src rust
+#+name:    simple-languages--semantics--typing--untyped
+#+date:    <2026-10-01>
+#+begin_src rust
+// =============================================================================
+// Linguagens sem tipos
+// =============================================================================
 
-# #+end_src
+/// O único tipo de uma linguagem não-tipada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Untyped;
+
+impl fmt::Display for Untyped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Untyped")
+    }
+}
+
+impl ToLatex for Untyped {
+    fn to_latex(&self) -> String {
+        r"\mathsf{Untyped}".to_string()
+    }
+}
+
+crate::rules! {
+    pub enum NoTypingRule { Any => "T-Any" }
+}
+
+/// `Typing` para linguagens sem sistema de tipos: todo termo é bem tipado,
+/// com o tipo [`Untyped`]. Quem usa o `Language` com uma linguagem
+/// não-tipada escreve `type Typing = NoTyping<Term>`.
+pub struct NoTyping<T>(PhantomData<fn() -> T>);
+
+impl<T: Clone> Typing for NoTyping<T> {
+    type Term = T;
+    type Type = Untyped;
+    type Rule = NoTypingRule;
+    type Error = Infallible;
+
+    fn check(term: &T) -> Result<TypingDerivation<Self>, Infallible> {
+        Ok(Derivation::axiom(
+            Typed::closed(term.clone(), Untyped),
+            NoTypingRule::Any,
+        ))
+    }
+}
+#+end_src

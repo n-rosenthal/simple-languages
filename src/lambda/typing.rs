@@ -179,6 +179,15 @@ mod tests {
     }
 
     #[test]
+    fn context_is_restored_after_abstraction() {
+        // (λx:Bool. x) x  → o segundo x é livre
+        assert_eq!(
+            ty("(λx:Bool. x) x"),
+            Err(TypeError::UnboundVariable { name: "x".into() })
+        );
+    }
+
+    #[test]
     fn the_derivation_is_a_tree() {
         let d = LambdaTyping::check(&parse("λx:A. x")).unwrap();
 

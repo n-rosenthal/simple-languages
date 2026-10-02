@@ -29,3 +29,35 @@ pub trait BigStep {
         Self::evaluate(term).map(|derivation| derivation.conclusion.value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::semantics::toy::*;
+
+    #[test]
+    fn evaluates_nested_additions() {
+        let t = add(add(num(1), num(2)), num(3));
+        assert_eq!(ToyBigStep::value_of(&t).unwrap(), Value::Num(6));
+    }
+
+    #[test]
+    fn derivation_records_every_rule_application() {
+        let d = ToyBigStep::evaluate(&add(num(1), num(2))).unwrap();
+
+        assert_eq!(d.conclusion.value, Value::Num(3));
+        assert_eq!(
+            d.postorder_rules(),
+            vec![EvalRule::Num, EvalRule::Num, EvalRule::Add]
+        );
+        assert_eq!(
+            d.to_text(),
+            "(1 + 2) ⇓ 3  [E-Add]\n  1 ⇓ 1  [E-Num]\n  2 ⇓ 2  [E-Num]\n"
+        );
+    }
+
+    #[test]
+    fn no_derivation_means_an_error_not_a_stuck_state() {
+        assert!(ToyBigStep::evaluate(&add(num(1), boolean(true))).is_err());
+    }
+}

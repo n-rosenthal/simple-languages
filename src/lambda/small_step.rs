@@ -124,16 +124,13 @@ mod tests {
 
     #[test]
     fn substitution_does_not_capture_free_variables() {
-        // (λx:A. λy:A. x) y  →  λy1:A. y   (o y livre não é capturado)
-        let step = LambdaSmallStep::step(&parse("(λx:A. λy:A. x) y"));
-        // y é livre, não valor: primeiro tenta reduzir o argumento e trava...
-        assert!(step.is_none());
+        // (λx:A. λy:A. x) y: `y` é livre e não é valor, então a execução trava
+        // antes da substituição.
+        assert!(LambdaSmallStep::step(&parse("(λx:A. λy:A. x) y")).is_none());
 
-        // ...então o caso de captura é exercitado por um argumento que é valor:
-        let t = Term::app(
-            parse("λx:A. λy:A. x"),
-            parse("λz:A. y"), // valor com y livre
-        );
+        // A captura só aparece com um argumento que é valor e tem variável
+        // livre: uma abstração aberta.
+        let t = Term::app(parse("λx:A. λy:A. x"), parse("λz:A. y"));
         let step = LambdaSmallStep::step(&t).unwrap();
         assert_eq!(step.to, parse("λy1:A. λz:A. y"));
     }

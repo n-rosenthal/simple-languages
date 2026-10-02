@@ -2,11 +2,10 @@ use std::fmt;
 
 use crate::common::{Scanner, SourceLine};
 
-/// Errors produced by the scanner.
+/// Erros produzidos pelo scanner.
 ///
-/// Splitting a string into lines cannot fail today, but the `Scanner`
-/// trait returns a `Result`, and this leaves room for future checks
-/// (e.g. rejecting control characters).
+/// Dividir uma string em linhas não falha hoje, mas o trait `Scanner`
+/// devolve um `Result`, e isto deixa espaço para novas checagens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanError {
     UnexpectedControlCharacter { character: char, line: usize },
@@ -46,25 +45,19 @@ impl Scanner for LambdaScanner {
     fn scan(input: &str) -> Result<Vec<SourceLine>, Self::Error> {
         let mut lines = Vec::new();
 
-        // `str::lines` splits on `\n` and strips a trailing `\r`,
-        // so both Unix and Windows line endings work.
+        // `str::lines` divide em `\n` e remove um `\r` final, então
+        // terminações Unix e Windows funcionam.
         for (index, text) in input.lines().enumerate() {
-            let number = index + 1; // 1-based, as in the arith tests
+            let number = index + 1;
 
-            if let Some(character) = text
-                .chars()
-                .find(|c| c.is_control() && *c != '\t')
-            {
+            if let Some(character) = text.chars().find(|c| c.is_control() && *c != '\t') {
                 return Err(ScanError::UnexpectedControlCharacter {
                     character,
                     line: number,
                 });
             }
 
-            lines.push(SourceLine {
-                number,
-                text: text.to_string(),
-            });
+            lines.push(SourceLine { number, text: text.to_string() });
         }
 
         Ok(lines)
@@ -107,4 +100,4 @@ mod tests {
     fn rejects_control_characters() {
         assert!(LambdaScanner::scan("a\u{0007}b").is_err());
     }
-}   
+}

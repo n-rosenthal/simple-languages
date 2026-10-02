@@ -222,13 +222,103 @@ impl Env {
 // =============================================================================
 // A máquina
 // =============================================================================
-
 /// Retorno pendente de uma chamada ou de um ramo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub code: Code,
     pub pc: usize,
     pub env: Env,
+}
+
+#[derive(Clone)]
+struct FrameNode {
+    frame: Frame,
+    parent: Frames,
+}
+
+#[derive(Clone)]
+pub struct Frames(Option<Rc<FrameNode>>);
+
+impl Frames {
+    pub fn empty() -> Self {
+        Frames(None)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    pub fn push(&self, frame: Frame) -> Frames {
+        Frames(Some(Rc::new(FrameNode {
+            frame,
+            parent: self.clone(),
+        })))
+    }
+
+    /// O quadro do topo e o resto da pilha.
+    pub fn pop(&self) -> Option<(Frame, Frames)> {
+        self.0
+            .as_ref()
+            .map(|node| (node.frame.clone(), node.parent.clone()))
+    }
+
+    pub fn len(&self) -> usize {
+        self.iter().count()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Frame> {
+        let mut next = self.0.as_deref();
+
+        std::iter::from_fn(move || {
+            let node = next?;
+            next = node.parent.0.as_deref();
+            Some(&node.frame)
+        })
+    }
+}
+
+impl Default for Frames {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl PartialEq for Frames {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+
+            (Some(a), Some(b)) if Rc::ptr_eq(a, b) => true,
+
+            _ => self.iter().eq(other.iter()),
+        }
+    }
+}
+
+impl Eq for Frames {}
+
+impl std::fmt::Debug for Frames {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl Drop for Frames {
+    fn drop(&mut self) {
+        let mut current = self.0.take();
+
+        while let Some(rc) = current {
+            match Rc::try_unwrap(rc) {
+                Ok(mut node) => {
+                    current = node.parent.0.take();
+                }
+                Err(_) => {
+                    // O restante da lista é compartilhado.
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// Uma configuração: `⟨código, pc, pilha, ambiente, quadros, memória⟩`.
@@ -238,14 +328,14 @@ pub struct Config {
     pub pc: usize,
     pub stack: Vec<Value>,
     pub env: Env,
-    pub frames: Vec<Frame>,
+    pub frames: Frames,
     pub store: Store<Value>,
 }
 
 impl Config {
     /// Salva a continuação atual e passa a executar `code` em `env`.
     fn call(&mut self, code: Code, env: Env) {
-        self.frames.push(Frame {
+        self.frames = self.frames.push(Frame {
             code: self.code.clone(),
             pc: self.pc,
             env: self.env.clone(),
@@ -310,7 +400,8 @@ impl Step for Vm {
         let rule = match config.code.get(config.pc) {
             // Fim do código: volta ao chamador.
             None => {
-                let frame = next.frames.pop()?;
+                let (frame, rest) = next.frames.pop()?;
+                next.frames = rest;
                 next.code = frame.code;
                 next.pc = frame.pc;
                 next.env = frame.env;
@@ -418,7 +509,7 @@ impl Machine for Vm {
             pc: 0,
             stack: Vec::new(),
             env: Env::empty(),
-            frames: Vec::new(),
+            frames: Frames::default(),
             store: Store::new(),
         }
     }

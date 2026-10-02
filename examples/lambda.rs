@@ -15,16 +15,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 2. Built by hand, mirroring the arith main: λx:Bool. x
-    let term = Term::Lambda { param: "x".to_string(), body: Box::new(Term::Var("x".to_string())) };
+    let term = Term::Lambda {
+        param: "x".to_string(),
+        body: Box::new(Term::Var("x".to_string())),
+        ty: Type::Base("Bool".to_string()),
+    };
     println!("term: {term}");
-
-    // 3. Once the parser and checker exist:
-    // let parsed = LambdaParser::parse(&tokens)?;
-    // let ty = LambdaTypeChecker::check(&parsed)?;
-    // println!("type: {ty}");
-    // let derivation = LambdaEvaluator::evaluate(&parsed)?;
-    // println!("value: {}", derivation.conclusion.value);
-    // println!("latex: {}", derivation.to_latex_tree());
-
     Ok(())
 }
