@@ -1,0 +1,334 @@
+//! Tipagem de `stlc` (TAPL, caps. 9 e 10): o julgamento `Γ ⊢ t : T`.
+
+use std::fmt;
+
+use crate::common::semantics::{Derivation, Typed, Typing, TypingDerivation};
+use crate::common::Context;
+
+use super::terms::Term;
+use super::types::Type;
+
+crate::rules! {
+    pub enum TypingRule {
+        /// Γ ⊢ true : Bool
+        True => "T-True",
+        /// Γ ⊢ false : Bool
+        False => "T-False",
+        /// Γ ⊢ t1 : Bool,  Γ ⊢ t2 : T,  Γ ⊢ t3 : T  ⟹  Γ ⊢ if t1 then t2 else t3 : T
+        If => "T-If",
+        /// x:T ∈ Γ  ⟹  Γ ⊢ x : T
+        Var => "T-Var",
+        /// Γ, x:T1 ⊢ t : T2  ⟹  Γ ⊢ λx:T1. t : T1 → T2
+        Abs => "T-Abs",
+        /// Γ ⊢ t1 : T1 → T2,  Γ ⊢ t2 : T1  ⟹  Γ ⊢ t1 t2 : T2
+        App => "T-App",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeError {
+    UnboundVariable { name: String },
+    NotAFunction { found: Type },
+    ArgumentMismatch { expected: Type, found: Type },
+    /// A condição de um `if` não é `Bool`.
+    InvalidCondition { found: Type },
+    /// Os ramos de um `if` têm tipos diferentes.
+    BranchTypeMismatch { then_type: Type, else_type: Type },
+}
+
+impl fmt::Display for TypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnboundVariable { name } => write!(f, "unbound variable `{name}`"),
+            Self::NotAFunction { found } => {
+                write!(f, "cannot apply a term of type `{found}`; expected a function type")
+            }
+            Self::ArgumentMismatch { expected, found } => write!(
+                f,
+                "argument has type `{found}`, but the function expects `{expected}`"
+            ),
+            Self::InvalidCondition { found } => {
+                write!(f, "if condition must have type Bool, found `{found}`")
+            }
+            Self::BranchTypeMismatch { then_type, else_type } => write!(
+                f,
+                "if branches must have the same type, found `{then_type}` and `{else_type}`"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TypeError {}
+
+pub struct StlcTyping;
+
+impl StlcTyping {
+    /// Deriva `Γ ⊢ t : T` para um Γ qualquer. O contexto é persistente:
+    /// estender Γ não altera o contexto do chamador, então não há nada
+    /// para restaurar quando um `?` interrompe a checagem.
+    pub fn check_in(
+        ctx: &Context<Type>,
+        term: &Term,
+    ) -> Result<TypingDerivation<Self>, TypeError> {
+        match term {
+            // T-True / T-False
+            Term::True => Ok(Derivation::axiom(
+                Typed::new(ctx.clone(), term.clone(), Type::Bool),
+                TypingRule::True,
+            )),
+            Term::False => Ok(Derivation::axiom(
+                Typed::new(ctx.clone(), term.clone(), Type::Bool),
+                TypingRule::False,
+            )),
+
+            // T-If
+            Term::If { condition, then_branch, else_branch } => {
+                let condition = Self::check_in(ctx, condition)?;
+                if condition.conclusion.ty != Type::Bool {
+                    return Err(TypeError::InvalidCondition { found: condition.conclusion.ty });
+                }
+
+                let then_branch = Self::check_in(ctx, then_branch)?;
+                let else_branch = Self::check_in(ctx, else_branch)?;
+                if then_branch.conclusion.ty != else_branch.conclusion.ty {
+                    return Err(TypeError::BranchTypeMismatch {
+                        then_type: then_branch.conclusion.ty,
+                        else_type: else_branch.conclusion.ty,
+                    });
+                }
+
+                let ty = then_branch.conclusion.ty.clone();
+                Ok(Derivation::node(
+                    Typed::new(ctx.clone(), term.clone(), ty),
+                    TypingRule::If,
+                    vec![condition, then_branch, else_branch],
+                ))
+            }
+
+            // T-Var
+            Term::Var(name) => {
+                let ty = ctx
+                    .lookup(name)
+                    .cloned()
+                    .ok_or_else(|| TypeError::UnboundVariable { name: name.clone() })?;
+
+                Ok(Derivation::axiom(
+                    Typed::new(ctx.clone(), term.clone(), ty),
+                    TypingRule::Var,
+                ))
+            }
+
+            // T-Abs
+            Term::Lambda { param, ty, body } => {
+                let inner = ctx.extend(param.clone(), ty.clone());
+                let body_derivation = Self::check_in(&inner, body)?;
+                let result = Type::arrow(ty.clone(), body_derivation.conclusion.ty.clone());
+
+                Ok(Derivation::node(
+                    Typed::new(ctx.clone(), term.clone(), result),
+                    TypingRule::Abs,
+                    vec![body_derivation],
+                ))
+            }
+
+            // T-App
+            Term::App { func, arg } => {
+                let func_derivation = Self::check_in(ctx, func)?;
+                let arg_derivation = Self::check_in(ctx, arg)?;
+
+                let (from, to) = match &func_derivation.conclusion.ty {
+                    Type::Arrow(from, to) => ((**from).clone(), (**to).clone()),
+                    found => return Err(TypeError::NotAFunction { found: found.clone() }),
+                };
+
+                if from != arg_derivation.conclusion.ty {
+                    return Err(TypeError::ArgumentMismatch {
+                        expected: from,
+                        found: arg_derivation.conclusion.ty.clone(),
+                    });
+                }
+
+                Ok(Derivation::node(
+                    Typed::new(ctx.clone(), term.clone(), to),
+                    TypingRule::App,
+                    vec![func_derivation, arg_derivation],
+                ))
+            }
+        }
+    }
+}
+
+impl Typing for StlcTyping {
+    type Term = Term;
+    type Type = Type;
+    type Rule = TypingRule;
+    type Error = TypeError;
+
+    fn check(term: &Term) -> Result<TypingDerivation<Self>, TypeError> {
+        Self::check_in(&Context::empty(), term)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stlc::testing::parse;
+
+    fn ty(source: &str) -> Result<Type, TypeError> {
+        StlcTyping::type_of(&parse(source))
+    }
+
+    fn base(name: &str) -> Type {
+        Type::base(name)
+    }
+
+    #[test]
+    fn identity_has_an_arrow_type() {
+        assert_eq!(ty("λx:Bool. x"), Ok(Type::arrow(base("Bool"), base("Bool"))));
+    }
+
+    #[test]
+    fn curried_constant_function() {
+        assert_eq!(
+            ty("λx:A. λy:B. x"),
+            Ok(Type::arrow(base("A"), Type::arrow(base("B"), base("A"))))
+        );
+    }
+
+    #[test]
+    fn application() {
+        assert_eq!(ty("(λf:A->A. f) (λy:A. y)"), Ok(Type::arrow(base("A"), base("A"))));
+    }
+
+    #[test]
+    fn unbound_variable() {
+        assert_eq!(ty("z"), Err(TypeError::UnboundVariable { name: "z".into() }));
+    }
+
+    #[test]
+    fn applying_a_non_function() {
+        assert!(matches!(ty("λx:A. x x"), Err(TypeError::NotAFunction { .. })));
+    }
+
+    #[test]
+    fn argument_mismatch() {
+        assert_eq!(
+            ty("(λx:A. x) (λy:A. y)"),
+            Err(TypeError::ArgumentMismatch {
+                expected: base("A"),
+                found: Type::arrow(base("A"), base("A")),
+            })
+        );
+    }
+
+    #[test]
+    fn inner_binding_shadows_outer() {
+        assert_eq!(
+            ty("λx:A. λx:B. x"),
+            Ok(Type::arrow(base("A"), Type::arrow(base("B"), base("B"))))
+        );
+    }
+
+    #[test]
+    fn context_is_restored_after_abstraction() {
+        // (λx:Bool. x) x  → o segundo x é livre
+        assert_eq!(
+            ty("(λx:Bool. x) x"),
+            Err(TypeError::UnboundVariable { name: "x".into() })
+        );
+    }
+
+    #[test]
+    fn boolean_literals() {
+        assert_eq!(ty("true"), Ok(Type::Bool));
+        assert_eq!(ty("false"), Ok(Type::Bool));
+    }
+
+    #[test]
+    fn negation() {
+        assert_eq!(
+            ty("λb:Bool. if b then false else true"),
+            Ok(Type::arrow(Type::Bool, Type::Bool))
+        );
+    }
+
+    #[test]
+    fn conditionals_can_return_functions() {
+        assert_eq!(
+            ty("if true then (λx:Bool. x) else (λx:Bool. if x then false else true)"),
+            Ok(Type::arrow(Type::Bool, Type::Bool))
+        );
+    }
+
+    #[test]
+    fn the_condition_must_be_bool() {
+        assert_eq!(
+            ty("if (λx:Bool. x) then true else false"),
+            Err(TypeError::InvalidCondition { found: Type::arrow(Type::Bool, Type::Bool) })
+        );
+    }
+
+    #[test]
+    fn the_branches_must_agree() {
+        assert_eq!(
+            ty("if true then true else (λx:Bool. x)"),
+            Err(TypeError::BranchTypeMismatch {
+                then_type: Type::Bool,
+                else_type: Type::arrow(Type::Bool, Type::Bool),
+            })
+        );
+    }
+
+    #[test]
+    fn bool_is_not_an_abstract_base_type() {
+        // `A` e `Bool` são tipos distintos
+        assert!(matches!(
+            ty("(λx:A. x) true"),
+            Err(TypeError::ArgumentMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn conditionals_use_the_context() {
+        assert_eq!(
+            ty("λb:Bool. λx:A. if b then x else x"),
+            Ok(Type::arrow(Type::Bool, Type::arrow(base("A"), base("A"))))
+        );
+    }
+
+    #[test]
+    fn the_derivation_of_a_conditional_has_three_premises() {
+        let d = StlcTyping::check(&parse("if true then false else true")).unwrap();
+
+        assert_eq!(d.rule, TypingRule::If);
+        assert_eq!(d.premises.len(), 3);
+        assert_eq!(
+            d.postorder_rules(),
+            vec![TypingRule::True, TypingRule::False, TypingRule::True, TypingRule::If]
+        );
+    }
+
+    #[test]
+    fn the_derivation_is_a_tree() {
+        let d = StlcTyping::check(&parse("λx:A. x")).unwrap();
+
+        assert_eq!(d.size(), 2);
+        assert_eq!(d.postorder_rules(), vec![TypingRule::Var, TypingRule::Abs]);
+    }
+
+    #[test]
+    fn premises_carry_their_context() {
+        let d = StlcTyping::check(&parse("λx:A. x")).unwrap();
+
+        assert_eq!(d.conclusion.to_string(), "⊢ λx:A. x : A->A");
+        assert_eq!(d.premises[0].conclusion.to_string(), "x:A ⊢ x : A");
+    }
+
+    #[test]
+    fn application_has_two_premises() {
+        let d = StlcTyping::check(&parse("(λf:A->A. f) (λy:A. y)")).unwrap();
+
+        assert_eq!(d.premises.len(), 2);
+        assert_eq!(d.rule, TypingRule::App);
+    }
+}

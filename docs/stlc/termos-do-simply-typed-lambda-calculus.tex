@@ -1,0 +1,357 @@
+% Created 2026-10-03 sáb 10:30
+% Intended LaTeX compiler: xelatex
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{fontspec}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\author{Nícolas Rosenthal Dal Corso}
+\date{2026}
+\title{Implementação do Simply Typed Lambda Calculus em Rust}
+\hypersetup{
+ pdfauthor={Nícolas Rosenthal Dal Corso},
+ pdftitle={Implementação do Simply Typed Lambda Calculus em Rust},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={},
+ pdflang={English}}
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{Introdução}
+\label{sec:org412601e}
+
+Este relatório apresenta a implementação, em Rust, do \textbf{Simply Typed Lambda}
+\textbf{Calculus} (STLC), seguindo a formalização apresentada por Benjamin C. Pierce
+em \textbf{Types and Programming Languages} (TAPL).
+
+O cálculo lambda simplesmente tipado constitui uma extensão do cálculo lambda
+não tipado na qual cada parâmetro de uma função recebe um tipo explícito.
+Além das abstrações e aplicações características do cálculo lambda, a
+linguagem considerada nesta implementação possui valores booleanos e
+expressões condicionais. Dessa forma, a implementação contempla os elementos
+fundamentais necessários para estudar a relação entre sintaxe, tipagem e
+avaliação de uma linguagem funcional tipada.
+
+A implementação foi desenvolvida em Rust, utilizando tipos algébricos
+representados por \emph{enums} e estruturas recursivas por meio de
+\texttt{Box<T>}. Essa representação permite modelar diretamente a estrutura
+abstrata dos termos da linguagem e, ao mesmo tempo, aproveitar o sistema de
+tipos da própria linguagem Rust para garantir propriedades estruturais da
+implementação.
+
+A linguagem é organizada em torno de três componentes principais: os
+\textbf{termos}, que definem a sintaxe das expressões; os \textbf{tipos}, que descrevem as
+categorias sintáticas às quais os termos pertencem; e as regras de avaliação
+e tipagem, que determinam quais expressões são válidas e como elas são
+reduzidas.
+
+Neste relatório, a implementação é apresentada a partir de sua
+correspondência com a definição formal da linguagem. Inicialmente são
+descritos os termos e sua representação em Rust; em seguida, podem ser
+apresentados os tipos, as regras de tipagem e a avaliação operacional da
+linguagem.
+\section{Termos}
+\label{sec:org1cbfd93}
+
+Os termos da linguagem correspondem às expressões que podem ser construídas
+pelo STLC. A implementação considera seis formas sintáticas fundamentais:
+\section{variáveis;}
+\label{sec:orgd5eff92}
+\section{o valor booleano \texttt{true};}
+\label{sec:org8abbb0c}
+\section{o valor booleano \texttt{false};}
+\label{sec:orgb34ae02}
+\section{expressões condicionais;}
+\label{sec:org0f1daee}
+\section{abstrações lambda;}
+\label{sec:orgdd7b30b}
+\section{aplicações de funções.}
+\label{sec:orgc6ebb9b}
+
+Em Rust, essas formas são representadas pelo tipo algébrico \texttt{Term}:
+
+\begin{verbatim}
+use std::collections::BTreeSet;
+use std::fmt;
+
+use super::types::Type;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Term {
+/// `x`
+Var(String),
+/// `true`
+True,
+/// `false`
+False,
+/// `if c then t else e`
+If { condition: Box<Term>, then_branch: Box<Term>, else_branch: Box<Term> },
+/// `λx:T. body`
+Lambda { param: String, ty: Type, body: Box<Term> },
+/// `f x`
+App { func: Box<Term>, arg: Box<Term> },
+}
+\end{verbatim}
+
+A enumeração \texttt{Term} constitui uma representação direta da sintaxe abstrata
+da linguagem. Cada variante corresponde a uma construção sintática
+específica.
+\subsection{Sintaxe concreta}
+\label{sec:orgcc7fcbd}
+
+A sintaxe dos termos pode ser descrita pela seguinte gramática BNF:
+
+{[}
+\begin{array}{rcl}
+t &::=& x \
+&\mid& \mathrm{true} \
+&\mid& \mathrm{false} \
+&\mid& \mathrm{if}\ t\ \mathrm{then}\ t\ \mathrm{else}\ t \
+&\mid& \lambda x.\ t \
+&\mid& t\ t
+\end{array}
+]
+
+Em notação BNF, a mesma gramática pode ser apresentada como:
+
+{[}
+\begin{array}{rcl}
+t &::=& x
+\mid \mathrm{true}
+\mid \mathrm{false}
+\mid \mathrm{if}\ t\ \mathrm{then}\ t\ \mathrm{else}\ t
+\mid \lambda x.\ t
+\mid t\ t
+\end{array}
+]
+
+onde \(t\) representa um termo, \(x\) representa uma variável e \(T\) representa
+um tipo.
+
+A gramática estabelece apenas quais expressões pertencem à sintaxe da
+linguagem. A validade tipada dessas expressões é determinada posteriormente
+pelas regras de tipagem.
+\subsection{Variáveis}
+\label{sec:orgb66cdd6}
+
+Uma variável é representada pela produção
+
+{[}
+t ::= x.
+]
+
+Na implementação, essa construção corresponde à variante:
+
+\begin{verbatim}
+Var(String)
+\end{verbatim}
+
+O identificador da variável é armazenado como uma \texttt{String}. Assim, por
+exemplo, a expressão matemática
+
+{[}
+x
+]
+
+pode ser representada por:
+
+\begin{verbatim}
+Term::Var("x".to_string())
+\end{verbatim}
+
+A utilização de \texttt{String}, em vez de índices inteiros ou de uma estrutura
+separada para identificadores, mantém a representação próxima da notação
+utilizada na apresentação formal do cálculo.
+\subsection{Valores booleanos}
+\label{sec:org12aacda}
+
+A linguagem possui dois valores booleanos:
+
+{[}
+\mathrm{true}
+\qquad
+\mathrm{false}.
+]
+
+Eles são representados diretamente pelas variantes:
+
+\begin{verbatim}
+True,
+False,
+\end{verbatim}
+
+correspondendo respectivamente a:
+
+{[}
+\mathrm{true} : \mathrm{Bool}
+]
+
+e
+
+{[}
+\mathrm{false} : \mathrm{Bool}.
+]
+\subsection{Expressões condicionais}
+\label{sec:org3908273}
+
+Uma expressão condicional possui a forma
+
+{[}
+\mathrm{if}$\backslash$ t\_1$\backslash$ \mathrm{then}$\backslash$ t\_2$\backslash$ \mathrm{else}$\backslash$ t\_3.
+]
+
+Na implementação, ela é representada por:
+
+\begin{verbatim}
+If {
+condition: Box<Term>,
+then_branch: Box<Term>,
+else_branch: Box<Term>,
+}
+\end{verbatim}
+
+Os três campos são termos porque tanto a condição quanto os dois ramos
+podem conter expressões arbitrariamente complexas.
+
+Por exemplo,
+
+{[}
+\mathrm{if}$\backslash$ \mathrm{true}$\backslash$ \mathrm{then}$\backslash$ x$\backslash$ \mathrm{else}$\backslash$ y
+]
+
+pode ser representado por:
+
+\begin{verbatim}
+Term::If {
+condition: Box::new(Term::True),
+then_branch: Box::new(Term::Var("x".to_string())),
+else_branch: Box::new(Term::Var("y".to_string())),
+}
+\end{verbatim}
+
+A utilização de \texttt{Box<Term>} é necessária porque \texttt{Term} é um tipo recursivo:
+um termo condicional contém outros termos.
+\subsection{Abstrações lambda}
+\label{sec:org37a4b88}
+
+A abstração lambda constitui a construção utilizada para representar
+funções. No STLC, diferentemente do cálculo lambda não tipado, o parâmetro
+da função possui um tipo explícito:
+
+{[}
+\(\lambda\) x.$\backslash$ t.
+]
+
+A representação em Rust é:
+
+\begin{verbatim}
+Lambda {
+param: String,
+ty: Type,
+body: Box<Term>,
+}
+\end{verbatim}
+
+O campo \texttt{param} armazena o nome do parâmetro, enquanto \texttt{ty} armazena seu
+tipo. O corpo da função é novamente um \texttt{Term} e, portanto, é armazenado
+indiretamente através de \texttt{Box<Term>}.
+
+Por exemplo, a função identidade sobre booleanos,
+
+{[}
+\(\lambda\) x:\mathrm{Bool}.x,
+]
+
+pode ser representada por:
+
+\begin{verbatim}
+Term::Lambda {
+param: "x".to_string(),
+ty: Type::Bool,
+body: Box::new(Term::Var("x".to_string())),
+}
+\end{verbatim}
+
+A presença do tipo no próprio termo permite representar diretamente a
+sintaxe anotada do STLC.
+\subsection{Aplicações}
+\label{sec:orgeb4ea92}
+
+A aplicação de uma função a um argumento possui a forma
+
+{[}
+t\_1$\backslash$ t\_2.
+]
+
+Ela é representada pela variante:
+
+\begin{verbatim}
+App {
+func: Box<Term>,
+arg: Box<Term>,
+}
+\end{verbatim}
+
+Por exemplo, a aplicação da função identidade booleana ao valor \texttt{true},
+
+{[}
+(\(\lambda\) x:\mathrm{Bool}.x)$\backslash$ \mathrm{true},
+]
+
+pode ser representada por:
+
+\begin{verbatim}
+Term::App {
+func: Box::new(Term::Lambda {
+param: "x".to_string(),
+ty: Type::Bool,
+body: Box::new(Term::Var("x".to_string())),
+}),
+arg: Box::new(Term::True),
+}
+\end{verbatim}
+
+Assim como ocorre com as demais construções recursivas, \texttt{Box<Term>} permite
+que uma aplicação contenha termos arbitrariamente complexos tanto na posição
+de função quanto na posição de argumento.
+\subsection{Correspondência entre a sintaxe e a implementação}
+\label{sec:org944c63a}
+
+A correspondência entre a gramática e a representação em Rust pode ser
+resumida da seguinte forma:
+
+{[}
+\begin{array}{c|c}
+\text{Construção sintática} & \text{Representação Rust} \ \hline
+x & \mathrm{Term::Var(String)} \
+\mathrm{true} & \mathrm{Term::True} \
+\mathrm{false} & \mathrm{Term::False} \
+\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3
+& \mathrm{Term::If} \
+\lambda x.\ t
+& \mathrm{Term::Lambda} \
+t_1\ t_2
+& \mathrm{Term::App}
+\end{array}
+]
+
+Essa correspondência é intencionalmente próxima da definição formal. A
+estrutura recursiva de \texttt{Term} reproduz a estrutura da árvore sintática
+abstrata: cada termo composto contém subtermos representados por outros
+valores de \texttt{Term}.
+
+A derivação dos tipos desses termos, bem como as regras de avaliação, pode
+ser definida independentemente da representação concreta utilizada pelo
+programa. Isso permite separar a definição formal da linguagem de sua
+implementação e utilizar a enumeração \texttt{Term} como uma representação
+computacional da sintaxe abstrata.
+\end{document}

@@ -7,7 +7,7 @@ use crate::arith::Arith;
 use crate::common::driver::{Dispatch, Runner};
 use crate::common::language::Language;
 use crate::common::interpreter::{Interpreter, Session};
-use crate::lambda::Lambda;
+use crate::stlc::Stlc;
 
 type MakeRunner = fn() -> Box<dyn Runner>;
 type MakeSession = fn() -> Box<dyn Interpreter>;
@@ -20,11 +20,11 @@ fn session_of<L: Language + 'static>() -> Box<dyn Interpreter> {
     Box::new(Session::<L>::new())
 }
 
-const RUNNERS: &[MakeRunner] = &[runner::<Arith>, runner::<Lambda>];
+const RUNNERS: &[MakeRunner] = &[runner::<Arith>, runner::<Stlc>];
 
 const SESSIONS: &[(&str, MakeSession)] = &[
     (Arith::NAME, session_of::<Arith>),
-    (Lambda::NAME, session_of::<Lambda>),
+    (Stlc::NAME, session_of::<Stlc>),
 ];
 
 /// Os nomes das linguagens, na ordem de registro.
@@ -57,21 +57,21 @@ mod tests {
     use crate::common::driver::Command;
 
     fn run(command: Command, source: &str) -> Result<String, String> {
-        find("lambda").expect("lambda is registered").run(command, source)
+        find("stlc").expect("stlc is registered").run(command, source)
     }
 
     #[test]
     fn finds_languages_case_insensitively() {
-        assert!(find("Lambda").is_some());
+        assert!(find("Stlc").is_some());
         assert!(find("ARITH").is_some());
         assert!(find("nope").is_none());
-        assert!(session("Lambda").is_some());
+        assert!(session("Stlc").is_some());
         assert!(session("nope").is_none());
     }
 
     #[test]
     fn names_follow_registration_order() {
-        assert_eq!(names(), vec!["arith", "lambda"]);
+        assert_eq!(names(), vec!["arith", "stlc"]);
     }
 
     #[test]

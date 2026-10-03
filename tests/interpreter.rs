@@ -24,7 +24,7 @@ fn err(reply: Reply) -> String {
 
 #[test]
 fn the_default_mode_is_full() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     assert_eq!(s.mode(), Command::Full);
     assert!(ok(s.submit("λx:A. x")).contains("== type =="));
 }
@@ -68,10 +68,10 @@ fn blank_lines_are_ignored() {
 
 #[test]
 fn help_mentions_the_language_and_definitions_only_where_supported() {
-    let lambda = ok(session("lambda").submit(":help"));
+    let stlc = ok(session("stlc").submit(":help"));
     let arith = ok(session("arith").submit(":help"));
 
-    assert!(lambda.starts_with("lambda:") && lambda.contains("name = <term>"));
+    assert!(stlc.starts_with("stlc:") && stlc.contains("name = <term>"));
     assert!(arith.starts_with("arith:") && !arith.contains("name = <term>"));
 }
 
@@ -79,7 +79,7 @@ fn help_mentions_the_language_and_definitions_only_where_supported() {
 
 #[test]
 fn fuel_is_validated() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
 
     assert_eq!(ok(s.submit(":fuel 50")), "fuel: 50");
     assert_eq!(s.fuel(), 50);
@@ -93,14 +93,14 @@ fn fuel_is_validated() {
 
 #[test]
 fn set_fuel_clamps() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     assert_eq!(s.set_fuel(0), 1);
     assert_eq!(s.set_fuel(usize::MAX), MAX_FUEL);
 }
 
 #[test]
 fn fuel_stops_a_divergent_term() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     s.submit(":small");
     s.submit(":fuel 20");
 
@@ -110,7 +110,7 @@ fn fuel_stops_a_divergent_term() {
 
 #[test]
 fn long_traces_are_summarized() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     s.submit(":small");
 
     let out = ok(s.submit("(λx:A. x x) (λx:A. x x)"));
@@ -122,7 +122,7 @@ fn long_traces_are_summarized() {
 
 #[test]
 fn definitions_are_expanded_in_later_lines() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
 
     assert_eq!(ok(s.submit("id = λx:A. x")), "id = λx:A. x");
     s.submit(":small");
@@ -134,7 +134,7 @@ fn definitions_are_expanded_in_later_lines() {
 
 #[test]
 fn definitions_can_use_earlier_definitions() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     s.submit("id = λx:A. x");
     assert_eq!(ok(s.submit("twice_id = λy:A. id y")), "twice_id = λy:A. (λx:A. x) y");
 
@@ -144,7 +144,7 @@ fn definitions_can_use_earlier_definitions() {
 
 #[test]
 fn bound_variables_shadow_definitions() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     s.submit("x = λz:A. z");
     s.submit(":parse");
 
@@ -154,7 +154,7 @@ fn bound_variables_shadow_definitions() {
 
 #[test]
 fn redefining_a_name_replaces_it() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     s.submit("f = λx:A. x");
     s.submit("f = λy:B. y");
 
@@ -163,7 +163,7 @@ fn redefining_a_name_replaces_it() {
 
 #[test]
 fn defs_and_reset() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     assert_eq!(ok(s.submit(":defs")), "no definitions");
 
     s.submit("a = λx:A. x");
@@ -176,7 +176,7 @@ fn defs_and_reset() {
 
 #[test]
 fn definitions_report_syntax_errors_and_missing_terms() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     assert!(err(s.submit("f = λx. x")).starts_with("syntax error:"));
     assert!(err(s.submit("f =")).contains("missing term"));
     assert!(s.definitions().is_empty());
@@ -221,7 +221,7 @@ fn examples_are_listed_and_runnable() {
 
 #[test]
 fn a_bad_example_number_is_an_error() {
-    let mut s = session("lambda");
+    let mut s = session("stlc");
     err(s.submit(":example 0"));
     err(s.submit(":example 99"));
     err(s.submit(":example x"));
@@ -285,23 +285,33 @@ fn deep_nesting_is_rejected_before_parsing() {
 
 #[test]
 fn the_longest_allowed_chains_do_not_overflow_the_stack() {
-    // 1 + 1 + ... + 1 em ~2000 caracteres: uma árvore de ~500 níveis
-    let mut arith = session("arith");
-    let chain = vec!["1"; MAX_INPUT_CHARS / 4].join(" + ");
-    assert!(chain.chars().count() <= MAX_INPUT_CHARS);
-    ok(arith.submit(&chain));
+    // Em build debug os quadros são muito maiores que em release (que é o que
+    // roda no navegador, e passa até com 1 MiB de pilha), então este teste usa
+    // uma thread com pilha folgada.
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| {
+            // 1 + 1 + ... + 1 em ~2000 caracteres: uma árvore de ~500 níveis
+            let mut arith = session("arith");
+            let chain = vec!["1"; MAX_INPUT_CHARS / 4].join(" + ");
+            assert!(chain.chars().count() <= MAX_INPUT_CHARS);
+            ok(arith.submit(&chain));
 
-    // λx:A. λx:A. ... com o maior número de binders que cabe
-    let mut lambda = session("lambda");
-    let binders = "λx:A. ".repeat((MAX_INPUT_CHARS - 1) / 6) + "x";
-    assert!(binders.chars().count() <= MAX_INPUT_CHARS);
-    ok(lambda.submit(&binders));
+            // λx:A. λx:A. ... com o maior número de binders que cabe
+            let mut stlc = session("stlc");
+            let binders = "λx:A. ".repeat((MAX_INPUT_CHARS - 1) / 6) + "x";
+            assert!(binders.chars().count() <= MAX_INPUT_CHARS);
+            ok(stlc.submit(&binders));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[test]
 fn sessions_are_independent() {
-    let mut a = session("lambda");
-    let b = session("lambda");
+    let mut a = session("stlc");
+    let b = session("stlc");
 
     a.submit("f = λx:A. x");
     a.set_fuel(7);
@@ -312,8 +322,8 @@ fn sessions_are_independent() {
 
 #[test]
 fn language_metadata() {
-    let s = session("lambda");
-    assert_eq!(s.language(), "lambda");
+    let s = session("stlc");
+    assert_eq!(s.language(), "stlc");
     assert!(s.description().contains("lambda calculus"));
     assert!(s.supports_definitions());
 }

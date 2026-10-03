@@ -3,9 +3,4 @@ name = "simple-languages"
 version = "1.2.0"
 edition = "2021"
 
-[lib]
-name = "simple_languages"
-path = "src/lib.rs"
-
 [dependencies]
-thiserror = "1.0"

@@ -1,0 +1,2116 @@
+#+title: Implementação do Simply Typed Lambda Calculus em Rust
+#+author: Nícolas Rosenthal Dal Corso
+#+date: 2026
+
+* Introdução
+
+Este relatório apresenta a implementação, em Rust, do *Simply Typed Lambda*
+*Calculus* (STLC), seguindo a formalização apresentada por Benjamin C. Pierce
+em *Types and Programming Languages* (TAPL).
+
+O cálculo lambda simplesmente tipado constitui uma extensão do cálculo lambda
+não tipado na qual cada parâmetro de uma função recebe um tipo explícito.
+Além das abstrações e aplicações características do cálculo lambda, a
+linguagem considerada nesta implementação possui valores booleanos e
+expressões condicionais. Dessa forma, a implementação contempla os elementos
+fundamentais necessários para estudar a relação entre sintaxe, tipagem e
+avaliação de uma linguagem funcional tipada.
+
+A implementação foi desenvolvida em Rust, utilizando tipos algébricos
+representados por /enums/ e estruturas recursivas por meio de
+~Box<T>~. Essa representação permite modelar diretamente a estrutura
+abstrata dos termos da linguagem e, ao mesmo tempo, aproveitar o sistema de
+tipos da própria linguagem Rust para garantir propriedades estruturais da
+implementação.
+
+A linguagem é organizada em torno de três componentes principais: os
+*termos*, que definem a sintaxe das expressões; os *tipos*, que descrevem as
+categorias sintáticas às quais os termos pertencem; e as regras de avaliação
+e tipagem, que determinam quais expressões são válidas e como elas são
+reduzidas.
+
+Neste relatório, a implementação é apresentada a partir de sua
+correspondência com a definição formal da linguagem. Inicialmente são
+descritos os termos e sua representação em Rust; em seguida, podem ser
+apresentados os tipos, as regras de tipagem e a avaliação operacional da
+linguagem.
+
+* Termos
+
+Os termos da linguagem correspondem às expressões que podem ser construídas
+pelo STLC. A implementação considera seis formas sintáticas fundamentais:
+
+* variáveis;
+* o valor booleano ~true~;
+* o valor booleano ~false~;
+* expressões condicionais;
+* abstrações lambda;
+* aplicações de funções.
+
+Em Rust, essas formas são representadas pelo tipo algébrico ~Term~:
+
+#+begin_src rust
+use std::collections::BTreeSet;
+use std::fmt;
+
+use super::types::Type;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Term {
+/// `x`
+Var(String),
+/// `true`
+True,
+/// `false`
+False,
+/// `if c then t else e`
+If { condition: Box<Term>, then_branch: Box<Term>, else_branch: Box<Term> },
+/// `λx:T. body`
+Lambda { param: String, ty: Type, body: Box<Term> },
+/// `f x`
+App { func: Box<Term>, arg: Box<Term> },
+}
+#+end_src
+
+A enumeração ~Term~ constitui uma representação direta da sintaxe abstrata
+da linguagem. Cada variante corresponde a uma construção sintática
+específica.
+
+** Sintaxe concreta
+
+A sintaxe dos termos pode ser descrita pela seguinte gramática BNF:
+
+[
+\begin{array}{rcl}
+t &::=& x \
+&\mid& \mathrm{true} \
+&\mid& \mathrm{false} \
+&\mid& \mathrm{if}\ t\ \mathrm{then}\ t\ \mathrm{else}\ t \
+&\mid& \lambda x.\ t \
+&\mid& t\ t
+\end{array}
+]
+
+Em notação BNF, a mesma gramática pode ser apresentada como:
+
+[
+\begin{array}{rcl}
+t &::=& x
+\mid \mathrm{true}
+\mid \mathrm{false}
+\mid \mathrm{if}\ t\ \mathrm{then}\ t\ \mathrm{else}\ t
+\mid \lambda x.\ t
+\mid t\ t
+\end{array}
+]
+
+onde $t$ representa um termo, $x$ representa uma variável e $T$ representa
+um tipo.
+
+A gramática estabelece apenas quais expressões pertencem à sintaxe da
+linguagem. A validade tipada dessas expressões é determinada posteriormente
+pelas regras de tipagem.
+
+** Variáveis
+
+Uma variável é representada pela produção
+
+[
+t ::= x.
+]
+
+Na implementação, essa construção corresponde à variante:
+
+#+begin_src rust
+Var(String)
+#+end_src
+
+O identificador da variável é armazenado como uma ~String~. Assim, por
+exemplo, a expressão matemática
+
+[
+x
+]
+
+pode ser representada por:
+
+#+begin_src rust
+Term::Var("x".to_string())
+#+end_src
+
+A utilização de ~String~, em vez de índices inteiros ou de uma estrutura
+separada para identificadores, mantém a representação próxima da notação
+utilizada na apresentação formal do cálculo.
+
+** Valores booleanos
+
+A linguagem possui dois valores booleanos:
+
+[
+\mathrm{true}
+\qquad
+\mathrm{false}.
+]
+
+Eles são representados diretamente pelas variantes:
+
+#+begin_src rust
+True,
+False,
+#+end_src
+
+correspondendo respectivamente a:
+
+[
+\mathrm{true} : \mathrm{Bool}
+]
+
+e
+
+[
+\mathrm{false} : \mathrm{Bool}.
+]
+
+** Expressões condicionais
+
+Uma expressão condicional possui a forma
+
+[
+\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3.
+]
+
+Na implementação, ela é representada por:
+
+#+begin_src rust
+If {
+condition: Box<Term>,
+then_branch: Box<Term>,
+else_branch: Box<Term>,
+}
+#+end_src
+
+Os três campos são termos porque tanto a condição quanto os dois ramos
+podem conter expressões arbitrariamente complexas.
+
+Por exemplo,
+
+[
+\mathrm{if}\ \mathrm{true}\ \mathrm{then}\ x\ \mathrm{else}\ y
+]
+
+pode ser representado por:
+
+#+begin_src rust
+Term::If {
+condition: Box::new(Term::True),
+then_branch: Box::new(Term::Var("x".to_string())),
+else_branch: Box::new(Term::Var("y".to_string())),
+}
+#+end_src
+
+A utilização de ~Box<Term>~ é necessária porque ~Term~ é um tipo recursivo:
+um termo condicional contém outros termos.
+
+** Abstrações lambda
+
+A abstração lambda constitui a construção utilizada para representar
+funções. No STLC, diferentemente do cálculo lambda não tipado, o parâmetro
+da função possui um tipo explícito:
+
+[
+\lambda x.\ t.
+]
+
+A representação em Rust é:
+
+#+begin_src rust
+Lambda {
+param: String,
+ty: Type,
+body: Box<Term>,
+}
+#+end_src
+
+O campo ~param~ armazena o nome do parâmetro, enquanto ~ty~ armazena seu
+tipo. O corpo da função é novamente um ~Term~ e, portanto, é armazenado
+indiretamente através de ~Box<Term>~.
+
+Por exemplo, a função identidade sobre booleanos,
+
+[
+\lambda x:\mathrm{Bool}.x,
+]
+
+pode ser representada por:
+
+#+begin_src rust
+Term::Lambda {
+param: "x".to_string(),
+ty: Type::Bool,
+body: Box::new(Term::Var("x".to_string())),
+}
+#+end_src
+
+A presença do tipo no próprio termo permite representar diretamente a
+sintaxe anotada do STLC.
+
+** Aplicações
+
+A aplicação de uma função a um argumento possui a forma
+
+[
+t_1\ t_2.
+]
+
+Ela é representada pela variante:
+
+#+begin_src rust
+App {
+func: Box<Term>,
+arg: Box<Term>,
+}
+#+end_src
+
+Por exemplo, a aplicação da função identidade booleana ao valor ~true~,
+
+[
+(\lambda x:\mathrm{Bool}.x)\ \mathrm{true},
+]
+
+pode ser representada por:
+
+#+begin_src rust
+Term::App {
+func: Box::new(Term::Lambda {
+param: "x".to_string(),
+ty: Type::Bool,
+body: Box::new(Term::Var("x".to_string())),
+}),
+arg: Box::new(Term::True),
+}
+#+end_src
+
+Assim como ocorre com as demais construções recursivas, ~Box<Term>~ permite
+que uma aplicação contenha termos arbitrariamente complexos tanto na posição
+de função quanto na posição de argumento.
+
+** Correspondência entre a sintaxe e a implementação
+
+A correspondência entre a gramática e a representação em Rust pode ser
+resumida da seguinte forma:
+
+[
+\begin{array}{c|c}
+\text{Construção sintática} & \text{Representação Rust} \ \hline
+x & \mathrm{Term::Var(String)} \
+\mathrm{true} & \mathrm{Term::True} \
+\mathrm{false} & \mathrm{Term::False} \
+\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3
+& \mathrm{Term::If} \
+\lambda x.\ t
+& \mathrm{Term::Lambda} \
+t_1\ t_2
+& \mathrm{Term::App}
+\end{array}
+]
+
+Essa correspondência é intencionalmente próxima da definição formal. A
+estrutura recursiva de ~Term~ reproduz a estrutura da árvore sintática
+abstrata: cada termo composto contém subtermos representados por outros
+valores de ~Term~.
+
+A derivação dos tipos desses termos, bem como as regras de avaliação, pode
+ser definida independentemente da representação concreta utilizada pelo
+programa. Isso permite separar a definição formal da linguagem de sua
+implementação e utilizar a enumeração ~Term~ como uma representação
+computacional da sintaxe abstrata.
+** Construção de termos
+
+Além da enumeração ~Term~, a implementação fornece construtores associados
+que permitem criar termos sem a necessidade de manipular diretamente as
+variantes da enumeração. Esses construtores funcionam como uma pequena
+interface para a construção da árvore sintática abstrata.
+
+#+begin_src rust
+impl Term {
+pub fn variable(name: impl Into<String>) -> Self {
+Self::Var(name.into())
+}
+
+```
+pub fn boolean(value: bool) -> Self {
+    if value {
+        Self::True
+    } else {
+        Self::False
+    }
+}
+
+pub fn if_then_else(condition: Term, then_branch: Term, else_branch: Term) -> Self {
+    Self::If {
+        condition: Box::new(condition),
+        then_branch: Box::new(then_branch),
+        else_branch: Box::new(else_branch),
+    }
+}
+
+pub fn lambda(param: impl Into<String>, ty: Type, body: Term) -> Self {
+    Self::Lambda {
+        param: param.into(),
+        ty,
+        body: Box::new(body),
+    }
+}
+
+pub fn app(func: Term, arg: Term) -> Self {
+    Self::App {
+        func: Box::new(func),
+        arg: Box::new(arg),
+    }
+}
+```
+
+}
+#+end_src
+
+O construtor ~variable~ recebe qualquer tipo que possa ser convertido em
+~String~, permitindo tanto literais de string quanto valores ~String~:
+
+#+begin_src rust
+Term::variable("x")
+Term::variable(String::from("x"))
+#+end_src
+
+O construtor ~boolean~ realiza a correspondência entre um valor booleano de
+Rust e os dois construtores booleanos da linguagem:
+
+#+begin_src rust
+Term::boolean(true)  // Term::True
+Term::boolean(false) // Term::False
+#+end_src
+
+Os demais construtores encapsulam a criação das estruturas recursivas.
+Assim, ~if_then_else~, ~lambda~ e ~app~ realizam automaticamente a conversão
+dos subtermos para ~Box<Term>~.
+
+Essa interface reduz a quantidade de detalhes de implementação necessária
+para construir expressões. Por exemplo, a aplicação
+
+$$
+(\lambda x:\mathrm{Bool}.x)\ \mathrm{true}
+$$
+
+pode ser construída de forma compacta:
+
+#+begin_src rust
+Term::app(
+Term::lambda(
+"x",
+Type::Bool,
+Term::variable("x"),
+),
+Term::boolean(true),
+)
+#+end_src
+
+Essa representação também facilita a construção de exemplos utilizados
+posteriormente nos testes do avaliador e do verificador de tipos.
+
+** Valores
+
+Na semântica operacional apresentada no TAPL, é necessário distinguir
+termos que já estão em forma de valor daqueles que ainda podem sofrer uma
+redução.
+
+Para a linguagem implementada, os valores são os booleanos e as
+abstrações lambda:
+
+$$
+v ::= \mathrm{true}
+\mid \mathrm{false}
+\mid \lambda x:T.\ t.
+$$
+
+A implementação dessa definição é:
+
+#+begin_src rust
+/// Valores: `true`, `false` e as abstrações (TAPL, cap. 9).
+pub fn is_value(&self) -> bool {
+matches!(self, Term::True | Term::False | Term::Lambda { .. })
+}
+#+end_src
+
+A função ~is_value~ retorna ~true~ exatamente quando o termo corresponde a
+uma das três formas de valor.
+
+Por exemplo:
+
+#+begin_src rust
+Term::True.is_value()                    // true
+Term::False.is_value()                   // true
+Term::lambda("x", Type::Bool, Term::variable("x")).is_value() // true
+#+end_src
+
+Por outro lado, uma aplicação não é um valor:
+
+#+begin_src rust
+Term::app(
+Term::lambda("x", Type::Bool, Term::variable("x")),
+Term::True,
+).is_value() // false
+#+end_src
+
+Essa distinção é fundamental para a semântica de avaliação. Uma aplicação
+como
+
+$$
+(\lambda x:T.\ t)\ v
+$$
+
+ainda precisa ser reduzida por substituição, enquanto uma abstração
+isoladamente já constitui um valor.
+
+** Variáveis livres
+
+A implementação também fornece uma operação para calcular o conjunto de
+variáveis livres de um termo:
+
+#+begin_src rust
+pub fn free_vars(&self) -> BTreeSet<String> {
+match self {
+Term::Var(x) => BTreeSet::from([x.clone()]),
+Term::True | Term::False => BTreeSet::new(),
+
+```
+    Term::If {
+        condition,
+        then_branch,
+        else_branch,
+    } => {
+        let mut vars = condition.free_vars();
+        vars.extend(then_branch.free_vars());
+        vars.extend(else_branch.free_vars());
+        vars
+    }
+
+    Term::Lambda { param, body, .. } => {
+        let mut vars = body.free_vars();
+        vars.remove(param);
+        vars
+    }
+
+    Term::App { func, arg } => {
+        let mut vars = func.free_vars();
+        vars.extend(arg.free_vars());
+        vars
+    }
+}
+```
+
+}
+#+end_src
+
+A noção de variável livre é definida estruturalmente. Para uma variável
+isolada,
+
+$$
+FV(x)=\{x\}.
+$$
+
+Para os valores booleanos,
+
+$$
+FV(\mathrm{true}) = FV(\mathrm{false}) = \varnothing.
+$$
+
+Para uma condicional,
+
+$$
+FV(\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3)
+=
+FV(t_1)\cup FV(t_2)\cup FV(t_3).
+$$
+
+Para uma aplicação,
+
+$$
+FV(t_1\ t_2)=FV(t_1)\cup FV(t_2).
+$$
+
+Finalmente, na abstração lambda, o parâmetro passa a ser uma variável
+ligada. Portanto,
+
+$$
+FV(\lambda x:T.\ t)=FV(t)-\{x\}.
+$$
+
+Por exemplo,
+
+$$
+FV(\lambda x:\mathrm{Bool}.\ x)=\varnothing,
+$$
+
+enquanto
+
+$$
+FV(\lambda x:\mathrm{Bool}.\ y)=\{y\}.
+$$
+
+A utilização de ~BTreeSet<String>~ fornece uma representação adequada do
+conjunto matemático de variáveis livres e, simultaneamente, permite
+operações como inserção, união e remoção.
+
+** Substituição
+
+A substituição é uma das operações centrais do cálculo lambda. A notação
+
+$$
+t[x\mapsto s]
+$$
+
+representa o termo obtido substituindo as ocorrências livres de $x$ em $t$
+pelo termo $s$.
+
+A implementação corresponde ao método:
+
+#+begin_src rust
+/// `[name ↦ replacement] self`, evitando captura: se um binder
+/// capturaria uma variável livre de `replacement`, ele é renomeado.
+pub fn substitute(&self, name: &str, replacement: &Term) -> Term {
+match self {
+Term::Var(x) if x == name => replacement.clone(),
+Term::Var(_) | Term::True | Term::False => self.clone(),
+
+```
+    Term::If {
+        condition,
+        then_branch,
+        else_branch,
+    } => Term::if_then_else(
+        condition.substitute(name, replacement),
+        then_branch.substitute(name, replacement),
+        else_branch.substitute(name, replacement),
+    ),
+
+    Term::App { func, arg } => Term::app(
+        func.substitute(name, replacement),
+        arg.substitute(name, replacement),
+    ),
+
+    Term::Lambda { param, ty, body } => {
+        if param == name || !body.free_vars().contains(name) {
+            return self.clone();
+        }
+
+        let replacement_vars = replacement.free_vars();
+
+        if replacement_vars.contains(param) {
+            let mut avoid = replacement_vars;
+            avoid.extend(body.free_vars());
+            avoid.insert(name.to_string());
+
+            let fresh = fresh_name(param, &avoid);
+            let renamed = body.substitute(
+                param,
+                &Term::variable(fresh.clone()),
+            );
+
+            Term::lambda(
+                fresh,
+                ty.clone(),
+                renamed.substitute(name, replacement),
+            )
+        } else {
+            Term::lambda(
+                param.clone(),
+                ty.clone(),
+                body.substitute(name, replacement),
+            )
+        }
+    }
+}
+```
+
+}
+#+end_src
+
+A implementação segue a estrutura sintática de ~Term~. No caso de uma
+variável igual ao nome procurado,
+
+$$
+x[x\mapsto s]=s.
+$$
+
+Para uma variável diferente,
+
+$$
+y[x\mapsto s]=y,
+\qquad x\neq y.
+$$
+
+Os valores booleanos não possuem variáveis e, portanto, permanecem
+inalterados.
+
+Para uma aplicação, a substituição é realizada recursivamente nos dois
+componentes:
+
+$$
+(t_1\ t_2)[x\mapsto s]
+=
+t_1[x\mapsto s]\ t_2[x\mapsto s].
+$$
+
+Para uma condicional, a substituição é realizada na condição e em ambos os
+ramos:
+
+$$
+\begin{aligned}
+&
+(\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3)[x\mapsto s]
+\\
+&\qquad =
+\mathrm{if}\ t_1[x\mapsto s]\
+\mathrm{then}\ t_2[x\mapsto s]\
+\mathrm{else}\ t_3[x\mapsto s].
+\end{aligned}
+$$
+
+O caso mais importante é a abstração lambda, pois é necessário respeitar a
+distinção entre variáveis livres e ligadas.
+
+*** Sombreamento
+
+Considere:
+
+$$
+(\lambda x:T.\ t)[x\mapsto s].
+$$
+
+Nesse caso, a ocorrência de $x$ dentro de $t$ está ligada pelo lambda e,
+portanto, não deve ser substituída. A implementação trata esse caso com:
+
+#+begin_src rust
+if param == name || !body.free_vars().contains(name) {
+return self.clone();
+}
+#+end_src
+
+O segundo caso ocorre quando a variável procurada nem sequer aparece
+livre no corpo da abstração. Nesse caso, também não existe nenhuma
+substituição a realizar.
+
+*** Evitando captura de variáveis
+
+Uma substituição ingênua pode introduzir incorretamente uma variável livre
+em um escopo no qual ela passa a ser ligada. Esse fenômeno é conhecido como
+*captura de variável*.
+
+Considere, por exemplo,
+
+$$
+(\lambda y.\ x)[x\mapsto y].
+$$
+
+Uma substituição ingênua produziria
+
+$$
+\lambda y.\ y,
+$$
+
+mas isso altera a estrutura de ligação do termo: o $y$ originalmente livre
+no termo substituto passou a ser capturado pelo lambda.
+
+O resultado correto exige primeiro renomear o parâmetro:
+
+$$
+\lambda y_1.\ y.
+$$
+
+A implementação detecta precisamente essa situação:
+
+#+begin_src rust
+let replacement_vars = replacement.free_vars();
+
+if replacement_vars.contains(param) {
+// renomeação do binder
+}
+#+end_src
+
+Se o parâmetro da abstração pertence ao conjunto de variáveis livres do
+termo substituto, o parâmetro é renomeado para um identificador novo antes
+da substituição.
+
+O conjunto de nomes que deve ser evitado é construído por:
+
+#+begin_src rust
+let mut avoid = replacement_vars;
+avoid.extend(body.free_vars());
+avoid.insert(name.to_string());
+#+end_src
+
+Dessa forma, o novo nome não coincide com variáveis livres do substituto,
+variáveis livres do corpo ou com o nome que está sendo substituído.
+
+** Geração de nomes frescos
+
+A função auxiliar ~fresh_name~ produz um identificador que não pertence ao
+conjunto de nomes proibidos:
+
+#+begin_src rust
+/// `base1`, `base2`, ... o primeiro que não está em `avoid`.
+fn fresh_name(base: &str, avoid: &BTreeSet<String>) -> String {
+(1..)
+.map(|n| format!("{base}{n}"))
+.find(|candidate| !avoid.contains(candidate))
+.expect("infinite iterator")
+}
+#+end_src
+
+Para um parâmetro ~y~, por exemplo, a função considera sequencialmente
+
+$$
+y_1,\ y_2,\ y_3,\ldots
+$$
+
+até encontrar o primeiro identificador que não pertence a ~avoid~.
+
+Assim, se
+
+$$
+\{y_1,y_2\}
+$$
+
+for o conjunto de nomes proibidos, o resultado será
+
+$$
+y_3.
+$$
+
+A função explora o fato de que o iterador sobre os inteiros positivos é
+infinito: como ~avoid~ é finito, necessariamente existe um candidato que
+não pertence ao conjunto.
+
+** α-equivalência
+
+A implementação também fornece uma operação para comparar termos módulo
+renomeação de variáveis ligadas:
+
+#+begin_src rust
+/// Igualdade módulo renomeação de variáveis ligadas (α-equivalência).
+pub fn alpha_eq(&self, other: &Term) -> bool {
+fn go(
+a: &Term,
+b: &Term,
+env_a: &mut Vec<String>,
+env_b: &mut Vec<String>,
+) -> bool {
+match (a, b) {
+(Term::Var(x), Term::Var(y)) => {
+let i = env_a.iter().rposition(|n| n == x);
+let j = env_b.iter().rposition(|n| n == y);
+
+```
+            match (i, j) {
+                (Some(i), Some(j)) => i == j,
+                (None, None) => x == y,
+                _ => false,
+            }
+        }
+
+        (Term::True, Term::True)
+        | (Term::False, Term::False) => true,
+
+        (
+            Term::If {
+                condition: c1,
+                then_branch: t1,
+                else_branch: e1,
+            },
+            Term::If {
+                condition: c2,
+                then_branch: t2,
+                else_branch: e2,
+            },
+        ) => {
+            go(c1, c2, env_a, env_b)
+                && go(t1, t2, env_a, env_b)
+                && go(e1, e2, env_a, env_b)
+        }
+
+        (
+            Term::Lambda {
+                param: p,
+                ty: t,
+                body: bp,
+            },
+            Term::Lambda {
+                param: q,
+                ty: u,
+                body: bq,
+            },
+        ) => {
+            if t != u {
+                return false;
+            }
+
+            env_a.push(p.clone());
+            env_b.push(q.clone());
+
+            let equal = go(bp, bq, env_a, env_b);
+
+            env_a.pop();
+            env_b.pop();
+
+            equal
+        }
+
+        (
+            Term::App {
+                func: f1,
+                arg: a1,
+            },
+            Term::App {
+                func: f2,
+                arg: a2,
+            },
+        ) => {
+            go(f1, f2, env_a, env_b)
+                && go(a1, a2, env_a, env_b)
+        }
+
+        _ => false,
+    }
+}
+
+go(self, other, &mut Vec::new(), &mut Vec::new())
+```
+
+}
+#+end_src
+
+A α-equivalência identifica abstrações que diferem apenas nos nomes de seus
+parâmetros. Por exemplo,
+
+$$
+\lambda x:\mathrm{Bool}.x
+$$
+
+e
+
+$$
+\lambda y:\mathrm{Bool}.y
+$$
+
+são α-equivalentes:
+
+$$
+\lambda x:\mathrm{Bool}.x
+\equiv_\alpha
+\lambda y:\mathrm{Bool}.y.
+$$
+
+Em contraste, os termos
+
+$$
+\lambda x:\mathrm{Bool}.y
+$$
+
+e
+
+$$
+\lambda y:\mathrm{Bool}.y
+$$
+
+não são α-equivalentes. No primeiro, $y$ é livre; no segundo, $y$ é ligado.
+
+*** Ambientes de ligação
+
+A função interna ~go~ implementa a comparação utilizando dois vetores que
+registram os nomes dos binders encontrados durante a travessia:
+
+#+begin_src rust
+env_a: &mut Vec<String>,
+env_b: &mut Vec<String>,
+#+end_src
+
+Quando dois lambdas são encontrados, seus parâmetros são adicionados aos
+respectivos ambientes:
+
+#+begin_src rust
+env_a.push(p.clone());
+env_b.push(q.clone());
+#+end_src
+
+Após a comparação dos corpos, os nomes são removidos:
+
+#+begin_src rust
+env_a.pop();
+env_b.pop();
+#+end_src
+
+A posição do binder no ambiente é utilizada para determinar se duas
+variáveis possuem a mesma origem de ligação. Para uma variável $x$ em
+~env_a~ e uma variável $y$ em ~env_b~, a implementação procura a última
+ocorrência de cada nome:
+
+#+begin_src rust
+let i = env_a.iter().rposition(|n| n == x);
+let j = env_b.iter().rposition(|n| n == y);
+#+end_src
+
+Isso também permite tratar corretamente o sombreamento de variáveis,
+situação em que dois binders possuem o mesmo nome.
+
+Se ambas as variáveis são ligadas, elas são consideradas equivalentes quando
+ocupam a mesma posição relativa nos respectivos ambientes. Se ambas são
+livres, seus nomes precisam coincidir literalmente.
+
+Essa estratégia evita a necessidade de modificar fisicamente os nomes das
+variáveis para realizar a comparação e fornece diretamente uma operação de
+α-equivalência sobre a representação sintática.
+
+** Impressão de termos e átomos
+
+A implementação também utiliza a função auxiliar ~is_atom~:
+
+#+begin_src rust
+/// Átomos não precisam de parênteses como argumento de uma aplicação.
+fn is_atom(term: &Term) -> bool {
+matches!(
+term,
+Term::Var(_) | Term::True | Term::False
+)
+}
+#+end_src
+
+A função classifica variáveis e valores booleanos como átomos. Esses termos
+não necessitam de parênteses quando aparecem como argumentos de uma
+aplicação.
+
+Por exemplo,
+
+$$
+f\ x
+$$
+
+pode ser impresso diretamente, enquanto uma aplicação como
+
+$$
+f\ (g\ x)
+$$
+
+necessita preservar os parênteses para evitar ambiguidade sintática.
+
+A função ~is_atom~ é, portanto, uma parte auxiliar da representação textual
+da árvore sintática, permitindo que a impressão respeite as convenções
+usuais de precedência e associatividade do cálculo lambda.
+
+** Síntese da implementação dos termos
+
+A implementação de ~Term~ não se limita a representar a sintaxe abstrata.
+Ela também concentra operações fundamentais para a manipulação do cálculo
+lambda:
+
+$$
+\begin{array}{c|l}
+\text{Operação} & \text{Função} \\ \hline
+\text{Construção} & \mathrm{variable},\ \mathrm{boolean},\
+                    \mathrm{if\_then\_else},\ \mathrm{lambda},\ \mathrm{app} \\
+\text{Reconhecimento de valores} & \mathrm{is\_value} \\
+\text{Variáveis livres} & \mathrm{free\_vars} \\
+\text{Substituição} & \mathrm{substitute} \\
+\text{α-equivalência} & \mathrm{alpha\_eq} \\
+\text{Geração de nomes} & \mathrm{fresh\_name} \\
+\text{Reconhecimento de átomos} & \mathrm{is\_atom}
+\end{array}
+$$
+
+Essas operações estabelecem a infraestrutura necessária para implementar a
+semântica operacional do STLC. Em particular, ~substitute~ será utilizada
+na regra de redução β da aplicação de uma abstração a um valor, enquanto
+~is_value~ será utilizada para determinar quando os argumentos das
+aplicações atingiram a forma necessária para a redução.
+
+A separação entre a representação dos termos e as operações sobre eles
+também permite que as regras formais do cálculo sejam traduzidas para Rust
+de maneira relativamente direta. A próxima etapa da implementação consiste,
+portanto, na definição dos tipos e dos julgamentos de tipagem que determinam
+quais desses termos são bem tipados.
+** Representação textual dos termos
+
+Para tornar os termos da linguagem legíveis e facilitar a utilização do
+interpretador, a implementação define uma instância de ~fmt::Display~ para
+~Term~. Essa implementação determina como cada construção da sintaxe
+abstrata é convertida para sua representação textual.
+
+#+begin_src rust
+impl fmt::Display for Term {
+fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+match self {
+Self::Var(x) => write!(f, "{x}"),
+Self::True => write!(f, "true"),
+Self::False => write!(f, "false"),
+
+```
+        Self::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            write!(
+                f,
+                "if {condition} then {then_branch} else {else_branch}"
+            )
+        }
+
+        Self::Lambda { param, ty, body } => {
+            write!(f, "λ{param}:{ty}. {body}")
+        }
+
+        Self::App { func, arg } => {
+            // Aplicação é associativa à esquerda: só uma abstração ou um
+            // `if` à esquerda precisam de parênteses.
+            match **func {
+                Term::Lambda { .. } | Term::If { .. } => {
+                    write!(f, "({func})")?
+                }
+                _ => write!(f, "{func}")?,
+            }
+
+            write!(f, " ")?;
+
+            if is_atom(arg) {
+                write!(f, "{arg}")
+            } else {
+                write!(f, "({arg})")
+            }
+        }
+    }
+}
+```
+
+}
+#+end_src
+
+A implementação realiza uma correspondência estrutural sobre as seis
+variantes de ~Term~. As construções simples são impressas diretamente,
+enquanto as construções compostas recebem tratamento especial para
+preservar a estrutura sintática.
+
+*** Variáveis e valores
+
+Variáveis são representadas simplesmente pelo seu nome:
+
+$$
+x
+$$
+
+e valores booleanos são impressos como:
+
+$$
+\mathrm{true}
+\qquad
+\mathrm{false}.
+$$
+
+Isso corresponde diretamente às implementações:
+
+#+begin_src rust
+Self::Var(x) => write!(f, "{x}"),
+Self::True => write!(f, "true"),
+Self::False => write!(f, "false"),
+#+end_src
+
+Assim, por exemplo:
+
+#+begin_src rust
+Term::variable("x").to_string()
+// "x"
+
+Term::boolean(true).to_string()
+// "true"
+#+end_src
+
+*** Condicionais
+
+As expressões condicionais são impressas na mesma forma da sintaxe concreta:
+
+$$
+\mathrm{if}\ t_1\ \mathrm{then}\ t_2\ \mathrm{else}\ t_3.
+$$
+
+A implementação é:
+
+#+begin_src rust
+Self::If {
+condition,
+then_branch,
+else_branch,
+} => {
+write!(
+f,
+"if {condition} then {then_branch} else {else_branch}"
+)
+}
+#+end_src
+
+A utilização recursiva de ~Display~ é importante: cada um dos três subtermos
+é convertido automaticamente para sua representação textual.
+
+Por exemplo,
+
+$$
+\mathrm{if}\ \mathrm{true}\ \mathrm{then}\ x\ \mathrm{else}\ y
+$$
+
+é produzido diretamente a partir da árvore:
+
+#+begin_src rust
+Term::if_then_else(
+Term::True,
+Term::variable("x"),
+Term::variable("y"),
+)
+#+end_src
+
+resultando na representação:
+
+#+begin_src text
+if true then x else y
+#+end_src
+
+*** Abstrações
+
+As abstrações são impressas utilizando a notação tradicional do cálculo
+lambda:
+
+$$
+\lambda x:T.\ t.
+$$
+
+A implementação é:
+
+#+begin_src rust
+Self::Lambda { param, ty, body } => {
+write!(f, "λ{param}:{ty}. {body}")
+}
+#+end_src
+
+Assim, uma função identidade sobre booleanos:
+
+$$
+\lambda x:\mathrm{Bool}.x
+$$
+
+é representada como:
+
+#+begin_src text
+λx:Bool. x
+#+end_src
+
+A impressão utiliza diretamente a implementação de ~Display~ de ~Type~ para
+representar o tipo do parâmetro.
+
+*** Aplicações e precedência
+
+A aplicação requer um tratamento especial porque possui convenções de
+precedência e associatividade.
+
+A sintaxe
+
+$$
+t_1\ t_2
+$$
+
+é normalmente considerada **associativa à esquerda**. Portanto,
+
+$$
+f\ x\ y
+$$
+
+representa:
+
+$$
+(f\ x)\ y
+$$
+
+e não:
+
+$$
+f\ (x\ y).
+$$
+
+A implementação explora essa convenção para minimizar a quantidade de
+parênteses necessária na impressão.
+
+#+begin_src rust
+Self::App { func, arg } => {
+match **func {
+Term::Lambda { .. } | Term::If { .. } => {
+write!(f, "({func})")?
+}
+_ => write!(f, "{func}")?,
+}
+
+```
+write!(f, " ")?;
+
+if is_atom(arg) {
+    write!(f, "{arg}")
+} else {
+    write!(f, "({arg})")
+}
+```
+
+}
+#+end_src
+
+Há dois casos distintos a serem considerados: o termo que ocupa a posição
+de função e o termo que ocupa a posição de argumento.
+
+**** Função
+
+Uma variável ou outra aplicação pode aparecer diretamente à esquerda de
+uma aplicação. Por exemplo:
+
+$$
+f\ x
+$$
+
+e
+
+$$
+f\ x\ y
+$$
+
+não precisam de parênteses adicionais.
+
+Uma abstração, entretanto, precisa ser delimitada:
+
+$$
+(\lambda x:T.\ t)\ u.
+$$
+
+Sem os parênteses, a expressão
+
+$$
+\lambda x:T.\ t\ u
+$$
+
+seria interpretada como uma abstração cujo corpo é a aplicação $t\ u$,
+devido ao escopo da abstração lambda.
+
+Da mesma maneira, uma condicional precisa ser delimitada quando aparece na
+posição de função:
+
+$$
+(\mathrm{if}\ c\ \mathrm{then}\ f\ \mathrm{else}\ g)\ x.
+$$
+
+Por isso, o código verifica se ~func~ é uma abstração ou uma expressão
+condicional:
+
+#+begin_src rust
+match **func {
+Term::Lambda { .. } | Term::If { .. } => {
+write!(f, "({func})")?
+}
+_ => write!(f, "{func}")?,
+}
+#+end_src
+
+**** Argumento
+
+Na posição de argumento, termos atômicos podem ser impressos diretamente.
+A função auxiliar ~is_atom~ definida anteriormente reconhece:
+
+#+begin_src rust
+fn is_atom(term: &Term) -> bool {
+matches!(
+term,
+Term::Var(_) | Term::True | Term::False
+)
+}
+#+end_src
+
+Assim, as expressões
+
+$$
+f\ x
+$$
+
+e
+
+$$
+f\ \mathrm{true}
+$$
+
+podem ser impressas sem parênteses.
+
+Por outro lado, uma aplicação composta precisa ser delimitada:
+
+$$
+f\ (g\ x).
+$$
+
+Uma abstração também precisa de parênteses:
+
+$$
+f\ (\lambda x:T.\ x).
+$$
+
+O mesmo vale para uma condicional:
+
+$$
+f\ (\mathrm{if}\ c\ \mathrm{then}\ t\ \mathrm{else}\ e).
+$$
+
+A implementação realiza essa distinção com:
+
+#+begin_src rust
+if is_atom(arg) {
+write!(f, "{arg}")
+} else {
+write!(f, "({arg})")
+}
+#+end_src
+
+*** Exemplos de impressão
+
+A implementação produz representações compactas para expressões
+frequentemente utilizadas no cálculo.
+
+Uma variável:
+
+#+begin_src text
+x
+#+end_src
+
+Uma abstração:
+
+#+begin_src text
+λx:Bool. x
+#+end_src
+
+Uma aplicação simples:
+
+#+begin_src text
+f x
+#+end_src
+
+Uma aplicação associativa à esquerda:
+
+#+begin_src text
+f x y
+#+end_src
+
+que corresponde à árvore:
+
+$$
+(f\ x)\ y.
+$$
+
+Uma aplicação de uma função lambda:
+
+#+begin_src text
+(λx:Bool. x) true
+#+end_src
+
+Uma aplicação cujo argumento é outra aplicação:
+
+#+begin_src text
+f (g x)
+#+end_src
+
+e uma aplicação cujo argumento é uma condicional:
+
+#+begin_src text
+f (if true then x else y)
+#+end_src
+
+Esses exemplos mostram que o objetivo da implementação de ~Display~ não é
+simplesmente serializar a árvore sintática. Ela também precisa reconstruir
+uma representação concreta que preserve a interpretação da expressão.
+
+*** Relação entre sintaxe abstrata e sintaxe concreta
+
+A enumeração ~Term~ representa a sintaxe abstrata da linguagem. Nessa
+representação, não existem parênteses explícitos: eles são determinados
+pela estrutura da árvore.
+
+Por exemplo, as expressões
+
+$$
+f\ x\ y
+$$
+
+e
+
+$$
+(f\ x)\ y
+$$
+
+possuem a mesma estrutura abstrata:
+
+$$
+\mathrm{App}
+\left(
+  \mathrm{App}(f,x),
+  y
+\right).
+$$
+
+Os parênteses são, portanto, uma propriedade da sintaxe concreta e não da
+árvore abstrata.
+
+Da mesma forma, uma expressão como
+
+$$
+(\lambda x:T.\ x)\ y
+$$
+
+é representada abstratamente por uma aplicação cujo termo funcional é uma
+abstração:
+
+$$
+\mathrm{App}
+\left(
+  \mathrm{Lambda}(x,T,x),
+  y
+\right).
+$$
+
+A implementação de ~Display~ reconstrói os parênteses necessários a partir
+dessa estrutura.
+
+Essa distinção entre sintaxe abstrata e concreta é importante para a
+implementação de uma linguagem de programação. Operações semânticas, como
+substituição, avaliação e verificação de tipos, operam sobre a árvore
+abstrata e não dependem da forma específica como os parênteses foram
+escritos pelo usuário.
+
+*** Integração com a implementação de termos
+
+Com a implementação de ~Display~, a estrutura de termos apresentada nas
+seções anteriores passa a possuir também uma representação textual
+canônica suficientemente compacta para inspeção durante a execução e para
+testes.
+
+O conjunto de operações implementado para ~Term~ pode ser resumido como:
+
+$$
+\begin{array}{c|l}
+\text{Operação} & \text{Responsabilidade} \\ \hline
+\mathrm{variable} & \text{construção de variáveis} \\
+\mathrm{boolean} & \text{construção de valores booleanos} \\
+\mathrm{if\_then\_else} & \text{construção de condicionais} \\
+\mathrm{lambda} & \text{construção de abstrações} \\
+\mathrm{app} & \text{construção de aplicações} \\
+\mathrm{is\_value} & \text{identificação de valores} \\
+\mathrm{free\_vars} & \text{cálculo das variáveis livres} \\
+\mathrm{substitute} & \text{substituição evitando captura} \\
+\mathrm{alpha\_eq} & \text{comparação por α-equivalência} \\
+\mathrm{Display} & \text{impressão da sintaxe concreta}
+\end{array}
+$$
+
+Essas operações formam a base da implementação do cálculo. Em particular,
+~substitute~, ~is_value~ e ~Display~ possuem papéis distintos: a primeira é
+necessária para a redução de aplicações, a segunda participa da definição
+dos valores da semântica operacional e a terceira fornece uma representação
+legível dos termos durante testes e execução.
+
+A próxima camada da implementação é a definição dos *tipos* da linguagem.
+Enquanto ~Term~ descreve quais expressões podem ser construídas, ~Type~
+descreverá quais categorias de valores essas expressões representam e
+permitirá formalizar o julgamento de tipagem
+
+$$
+\Gamma \vdash t : T.
+$$
+** Integração dos termos ao front-end
+
+A estrutura ~Term~ constitui a representação da sintaxe abstrata utilizada
+pelas demais etapas da implementação do STLC. Os termos não são construídos
+diretamente a partir de strings: o código organiza o processamento da
+linguagem em diferentes etapas, separando análise léxica, análise sintática
+e representação abstrata.
+
+A implementação da linguagem ~Stlc~ registra explicitamente essa
+organização. Ela utiliza ~StlcScanner~, ~StlcLexer~, ~StlcParser~ e
+~Term~, além dos componentes responsáveis por tipagem, avaliação e
+compilação.
+
+A estrutura geral do processamento pode ser representada por:
+
+$$
+\text{fonte}
+\longrightarrow
+\text{scanner}
+\longrightarrow
+\text{lexer}
+\longrightarrow
+\text{parser}
+\longrightarrow
+\text{Term}.
+$$
+
+A separação dessas etapas permite distinguir claramente diferentes tipos
+de erro. Em ~language.rs~, os erros de *scanning*, *lexing* e *parsing* são
+unificados em ~SyntaxError~, com uma variante correspondente a cada etapa:
+~Scan~, ~Lex~ e ~Parse~.
+
+#+begin_src rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxError {
+Scan(ScanError),
+Lex(LexError),
+Parse(ParseError),
+}
+#+end_src
+
+Além disso, as implementações de ~From~ permitem converter automaticamente
+os erros individuais para o tipo unificado. Dessa maneira, o método
+~parse~ da linguagem pode utilizar o operador ~?~ ao longo de todo o
+pipeline:
+
+#+begin_src rust
+fn parse(source: &str) -> Result<Term, SyntaxError> {
+let lines = StlcScanner::scan(source)?;
+let tokens = StlcLexer::analyze(&lines)?;
+Ok(StlcParser::parse(&tokens)?)
+}
+#+end_src
+
+Essa função evidencia o papel de ~Term~ como resultado da análise sintática:
+uma entrada textual válida percorre o scanner e o lexer, é organizada pelo
+parser e finalmente transformada em uma árvore de termos.
+
+** Análise léxica
+
+O lexer da linguagem reconhece os elementos léxicos necessários para a
+sintaxe do STLC. Sua documentação define identificadores, abstrações,
+pontuação, seta de tipos, parênteses e espaços em branco.
+
+Os identificadores seguem a forma
+
+$$
+\text{letra}(\text{letra}\mid\text{dígito}\mid\_ )^*.
+$$
+
+A implementação utiliza duas funções auxiliares:
+
+#+begin_src rust
+fn is_identifier_start(c: char) -> bool {
+c.is_ascii_alphabetic()
+}
+
+fn is_identifier_continue(c: char) -> bool {
+c.is_ascii_alphanumeric() || c == '_'
+}
+#+end_src
+
+Assim, nomes como ~x~, ~foo~, ~foo_1~ e ~Bool~ podem ser reconhecidos como
+identificadores. A implementação, entretanto, separa as palavras reservadas
+do restante dos identificadores. Os lexemas ~true~, ~false~, ~if~, ~then~ e
+~else~ são convertidos para seus respectivos tipos de token.
+
+Isso significa, por exemplo, que:
+
+#+begin_src text
+if true then false else x
+#+end_src
+
+é tokenizado como:
+
+#+begin_src text
+If True Then False Else Identifier
+#+end_src
+
+enquanto palavras que apenas possuem um prefixo semelhante a uma palavra
+reservada continuam sendo identificadores. Os testes da implementação
+explicitamente verificam esse comportamento.
+
+*** Notação para abstrações
+
+A linguagem aceita duas representações para a abstração lambda:
+
+$$
+\lambda x:T.\ t
+$$
+
+e
+
+$$
+\backslash x:T.\ t.
+$$
+
+O lexer associa tanto ~λ~ quanto ~~ ao mesmo tipo de token,
+~Lambda~.
+
+Isso permite escrever, por exemplo:
+
+#+begin_src text
+λx:Bool. x
+#+end_src
+
+ou:
+
+#+begin_src text
+\x:Bool. x
+#+end_src
+
+sem alterar a representação abstrata produzida posteriormente pelo parser.
+
+Essa decisão também facilita a utilização da linguagem em diferentes
+contextos: a notação matemática tradicional pode ser utilizada nos exemplos,
+enquanto a barra invertida oferece uma alternativa conveniente em ambientes
+nos quais o caractere ~λ~ é menos acessível.
+
+*** Tipos funcionais
+
+A seta ~->~ é reconhecida como um único token ~Arrow~. O lexer exige a
+presença dos dois caracteres e rejeita um ~-~ isolado como operador
+incompleto.
+
+Assim, tipos funcionais podem utilizar a notação:
+
+#+begin_src text
+Bool -> Bool
+A -> A
+(Bool -> Bool) -> Bool
+#+end_src
+
+A existência de um token específico para ~->~ permite ao parser distinguir
+claramente a construção de tipos funcionais da sequência de dois caracteres
+individuais.
+
+*** Posições dos tokens
+
+Outro detalhe da implementação é que os ~Span~ associados aos tokens
+utilizam posições em caracteres, e não em bytes. Isso é especialmente
+relevante para o símbolo ~λ~, que ocupa mais de um byte em UTF-8, mas conta
+como uma única posição da entrada.
+
+Por exemplo, para:
+
+#+begin_src text
+λx.x
+#+end_src
+
+as posições produzidas pelo lexer são:
+
+$$
+(0,1),\ (1,2),\ (2,3),\ (3,4).
+$$
+
+Esse comportamento é explicitamente testado na implementação.
+
+Essa escolha torna as posições mais naturais para mensagens de erro e para
+ferramentas que trabalham com a entrada textual da linguagem.
+
+** Exemplos de termos completos
+
+A integração entre lexer, parser e ~Term~ permite trabalhar diretamente com
+expressões representadas na sintaxe concreta. A implementação disponibiliza
+uma coleção de exemplos que cobre tanto programas válidos quanto expressões
+que devem produzir erros de tipagem ou avaliação.
+
+Entre os exemplos estão:
+
+#+begin_src text
+λx:A. x
+#+end_src
+
+que representa a função identidade;
+
+#+begin_src text
+λb:Bool. if b then false else true
+#+end_src
+
+que representa a negação booleana;
+
+#+begin_src text
+(λb:Bool. if b then false else true) true
+#+end_src
+
+que aplica a negação ao valor ~true~;
+
+e:
+
+#+begin_src text
+if true then false else (true true)
+#+end_src
+
+que permite observar a avaliação de condicionais.
+
+Há também exemplos destinados especificamente a testar propriedades da
+implementação de termos, como:
+
+#+begin_src text
+(λx:A. λy:A. x) (λz:A. y)
+#+end_src
+
+que testa substituição sem captura, e:
+
+#+begin_src text
+(λx:Bool. x) (λy:Bool. y)
+#+end_src
+
+que constitui um erro de tipo.
+
+Outro exemplo importante é:
+
+#+begin_src text
+(λx:A. x x) (λx:A. x x)
+#+end_src
+
+utilizado para representar o termo $\omega$, associado à divergência. Esse
+exemplo é particularmente interessante porque mostra a diferença entre
+*sintaxe*, *tipagem* e *terminação*: uma expressão pode ser sintaticamente
+bem formada sem necessariamente produzir um resultado durante a avaliação.
+
+** Interface da linguagem
+
+A implementação encapsula os componentes do STLC na estrutura:
+
+#+begin_src rust
+pub struct Stlc;
+#+end_src
+
+A linguagem é registrada com o nome ~stlc~ e descrita explicitamente como
+um cálculo lambda simplesmente tipado com ~Bool~ e avaliação
+*call-by-value*.
+
+A implementação da trait ~Language~ associa os componentes da linguagem:
+
+#+begin_src rust
+impl Language for Stlc {
+const NAME: &'static str = "stlc";
+const DESCRIPTION: &'static str =
+"simply typed lambda calculus with Bool, call-by-value (TAPL chs. 9-10); type λ or a backslash";
+const SUPPORTS_DEFINITIONS: bool = true;
+
+```
+type Term = Term;
+type Type = Type;
+type Value = Term;
+
+type SyntaxError = SyntaxError;
+
+type Typing = StlcTyping;
+type Small = StlcSmallStep;
+type Big = StlcBigStep;
+type Compiler = StlcCompiler;
+
+// ...
+```
+
+}
+#+end_src
+
+Essa definição é importante para compreender a arquitetura geral do projeto:
+~Term~ não é apenas uma estrutura auxiliar do parser, mas o tipo central
+que conecta diferentes componentes da implementação. O mesmo tipo de termo
+é utilizado como representação sintática, valor e entrada para os
+componentes de tipagem, avaliação e compilação.
+
+A própria interface expõe a operação de substituição:
+
+#+begin_src rust
+fn substitute(term: &Term, name: &str, value: &Term) -> Term {
+term.substitute(name, value)
+}
+#+end_src
+
+Desse modo, a implementação definida anteriormente em ~Term~ passa a ser
+utilizada pela infraestrutura comum das linguagens implementadas no
+projeto.
+
+** Relação com a especificação do TAPL
+
+A implementação apresentada até aqui mantém uma correspondência direta
+entre as construções formais do STLC e sua representação computacional.
+
+A sintaxe de termos pode ser vista como:
+
+$$
+t ::= x
+\mid \mathrm{true}
+\mid \mathrm{false}
+\mid
+\mathrm{if}\ t\ \mathrm{then}\ t\ \mathrm{else}\ t
+\mid
+\lambda x:T.\ t
+\mid
+t\ t.
+$$
+
+Essa sintaxe é representada pela enumeração ~Term~, enquanto as operações
+auxiliares implementam conceitos necessários à semântica do cálculo:
+
+$$
+\begin{array}{c|c}
+\text{Conceito formal} & \text{Implementação} \\ \hline
+\text{termo} & \mathrm{Term} \\
+\text{valor} & \mathrm{is\_value} \\
+\text{variáveis livres} & \mathrm{free\_vars} \\
+\text{substituição} & \mathrm{substitute} \\
+\alpha\text{-equivalência} & \mathrm{alpha\_eq} \\
+\text{nome fresco} & \mathrm{fresh\_name} \\
+\text{sintaxe concreta} & \mathrm{Display}
+\end{array}
+$$
+
+O front-end acrescenta outra correspondência:
+
+$$
+\text{fonte}
+\rightarrow
+\text{tokens}
+\rightarrow
+\text{AST}
+\rightarrow
+\text{Term}.
+$$
+
+A partir desse ponto, a implementação pode trabalhar sobre a representação
+abstrata sem depender dos detalhes da entrada textual. Isso permite que
+tipagem e avaliação sejam formuladas diretamente sobre ~Term~, aproximando
+a implementação em Rust das definições operacionais apresentadas no TAPL.
+
+A descrição dos termos constitui, portanto, a primeira camada da
+implementação da linguagem. A próxima camada corresponde aos **tipos**,
+seguida pelos **contextos de tipagem e regras de tipagem**, que estabelecem
+formalmente quando um termo construído pela gramática é bem tipado.
+
+* **Tokens do STLC**
+
+Após a etapa de varredura do código-fonte, o lexer transforma os fragmentos reconhecidos pelo scanner em tokens específicos da linguagem. No STLC, esses tokens são representados por `StlcTokenType` e `StlcToken`.
+
+O conjunto de categorias léxicas é definido pelo enum:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StlcTokenType {
+    /// `λ` ou `\`
+    Lambda,
+    /// `.`
+    Dot,
+    /// `:`
+    Colon,
+    /// `->`
+    Arrow,
+    /// `(`
+    LParen,
+    /// `)`
+    RParen,
+    /// Variáveis e nomes de tipos base (`x`, `f1`, `Bool`, `A`).
+    Identifier,
+    /// `true`
+    True,
+    /// `false`
+    False,
+    /// `if`
+    If,
+    /// `then`
+    Then,
+    /// `else`
+    Else,
+}
+```
+
+O enum distingue tanto os símbolos da sintaxe do cálculo lambda quanto as palavras reservadas da linguagem. Assim, a expressão
+
+```text
+λx:Bool. if x then false else true
+```
+
+pode ser decomposta, em termos de categorias, como:
+
+```text
+Lambda Identifier Colon Identifier Dot
+If Identifier Then False Else True
+```
+
+Os identificadores possuem um papel um pouco mais amplo do que o de representar apenas variáveis. A mesma categoria é utilizada para variáveis e para nomes de tipos base, como `x`, `f1`, `Bool` e `A`. A interpretação desses identificadores como variáveis ou tipos ocorre posteriormente, durante o parsing.
+
+Os símbolos `λ` e `\` pertencem à mesma categoria `Lambda`. Essa decisão permite que a sintaxe concreta aceite tanto a notação tradicional do cálculo lambda quanto uma forma alternativa conveniente para entrada textual:
+
+```text
+λx:Bool. x
+```
+
+ou
+
+```text
+\x:Bool. x
+```
+
+Da mesma forma, `->` é representado por um único token `Arrow`, permitindo a representação da sintaxe de tipos funcionais:
+
+```text
+Bool -> Bool
+```
+
+Os demais tokens correspondem diretamente aos elementos sintáticos utilizados pelo parser:
+
+| Token        | Sintaxe               | Função                            |
+| ------------ | --------------------- | --------------------------------- |
+| `Lambda`     | `λ` ou `\`            | introduz uma abstração            |
+| `Dot`        | `.`                   | separa parâmetro e corpo          |
+| `Colon`      | `:`                   | separa variável e tipo            |
+| `Arrow`      | `->`                  | representa tipo funcional         |
+| `LParen`     | `(`                   | abre agrupamento                  |
+| `RParen`     | `)`                   | fecha agrupamento                 |
+| `Identifier` | `x`, `f`, `Bool`, `A` | variáveis e nomes de tipos        |
+| `True`       | `true`                | literal booleano                  |
+| `False`      | `false`               | literal booleano                  |
+| `If`         | `if`                  | início de condicional             |
+| `Then`       | `then`                | separa condição e ramo verdadeiro |
+| `Else`       | `else`                | separa os dois ramos              |
+
+Cada token concreto é representado por `StlcToken`:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StlcToken {
+    pub kind: StlcTokenType,
+    pub lexeme: String,
+    pub span: Span,
+}
+```
+
+Há, portanto, três informações associadas a cada token:
+
+* `kind`: sua categoria léxica;
+* `lexeme`: o texto concreto correspondente ao token;
+* `span`: a posição que o token ocupa no código-fonte.
+
+A construção dos tokens é centralizada no método `new`:
+
+```rust
+impl StlcToken {
+    pub fn new(
+        kind: StlcTokenType,
+        lexeme: impl Into<String>,
+        span: Span,
+    ) -> Self {
+        Self {
+            kind,
+            lexeme: lexeme.into(),
+            span,
+        }
+    }
+}
+```
+
+O campo `lexeme` é mantido mesmo quando a categoria já identifica o token. Isso permite preservar o texto original durante as etapas posteriores do front-end. Para um identificador, por exemplo, `kind` informa que se trata de um `Identifier`, enquanto `lexeme` preserva seu nome específico:
+
+```text
+kind   = Identifier
+lexeme = "Bool"
+```
+
+Já para uma palavra reservada, a combinação entre categoria e lexema permite distinguir semanticamente o token sem perder sua representação textual:
+
+```text
+kind   = True
+lexeme = "true"
+```
+
+O campo `span` estabelece a ligação entre a estrutura léxica e o código-fonte original. Isso é particularmente importante para diagnóstico de erros, pois permite associar tokens e mensagens de erro às posições correspondentes da entrada.
+
+A separação entre `StlcTokenType` e `StlcToken` também mantém uma distinção útil entre **categoria léxica** e **ocorrência concreta**. `StlcTokenType::Identifier` descreve uma categoria abstrata, enquanto um `StlcToken` contém uma ocorrência particular dessa categoria, incluindo seu lexema e sua localização.
+
+Dessa forma, a representação léxica do STLC segue a estrutura:
+
+$$
+\text{fonte}
+\longrightarrow
+\text{scanner}
+\longrightarrow
+\text{linhas}
+\longrightarrow
+\text{lexer}
+\longrightarrow
+\text{tokens}
+\longrightarrow
+\text{parser}
+\longrightarrow
+\text{Term}.
+$$
+
+Essa etapa fornece ao parser uma representação estruturada da sintaxe concreta, permitindo que a construção da AST seja separada do reconhecimento dos caracteres e da classificação léxica.
+
+**Tipos**
+
+Com os termos e o front-end léxico estabelecidos, o próximo componente fundamental do STLC é a representação dos tipos. No cálculo lambda simplesmente tipado utilizado nesta implementação, os termos podem carregar tipos nas abstrações e as aplicações são verificadas de acordo com esses tipos.
+
+A implementação utiliza um tipo próprio para representar a sintaxe dos tipos. A distinção entre termos e tipos é importante: enquanto `Term` representa expressões que podem ser avaliadas, `Type` representa as informações estáticas utilizadas pelo sistema de tipagem.
+
+A sintaxe de tipos do STLC pode ser apresentada, em sua forma básica, por:
+
+$$
+T ::= A \mid T \rightarrow T
+$$
+
+onde \(A\) representa um tipo base e \(T_1 \rightarrow T_2\) representa um tipo funcional.
+
+Na implementação, os tipos base utilizados nos exemplos incluem `Bool` e identificadores como `A`. Assim, são possíveis tipos como:
+
+```text
+Bool
+A
+Bool -> Bool
+A -> A
+Bool -> (Bool -> Bool)
+```
+
+A representação concreta de `Type` será responsável por preservar essa estrutura recursiva. Em particular, um tipo funcional contém dois subtipos: o tipo de seu argumento e o tipo de seu resultado.
+
+Isso permite associar uma abstração como
+
+```text
+λx:Bool. x
+```
+
+ao tipo
+
+$$
+Bool \rightarrow Bool,
+$$
+
+enquanto uma abstração como
+
+```text
+λf:Bool->Bool. λb:Bool. f (f b)
+```
+
+possui um tipo funcional mais complexo, correspondente à operação de aplicar duas vezes uma função booleana.
+
+A partir dessa representação será possível definir o **julgamento de tipagem**
+
+$$
+\Gamma \vdash t : T,
+$$
+
+em que \(\Gamma\) é o contexto de tipos, \(t\) é um termo e \(T\) é o tipo atribuído ao termo.
+
+O contexto \(\Gamma\) registra os tipos conhecidos para as variáveis livres. Assim, para uma variável:
+
+$$
+\frac{x:T \in \Gamma}
+     {\Gamma \vdash x:T}
+\quad\text{T-VAR}
+$$
+
+e, para uma abstração:
+
+$$
+\frac{\Gamma,x:T_1 \vdash t_2:T_2}
+     {\Gamma \vdash \lambda x:T_1.t_2:T_1\rightarrow T_2}
+\quad\text{T-ABS}.
+$$
+
+A análise dessas regras dependerá diretamente da estrutura concreta de `Type` e da implementação de `StlcTyping`, que constituem a próxima camada do sistema.
