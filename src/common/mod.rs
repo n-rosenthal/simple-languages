@@ -8,6 +8,7 @@ pub mod semantics;
 pub mod machine_language;
 pub mod language;
 pub mod driver;
+pub mod interpreter;
 
 pub use context::Context;
 pub use latex::ToLatex;

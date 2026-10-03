@@ -1,0 +1,22 @@
+[package]
+name = "tapl-web"
+version = "0.1.0"
+edition = "2021"
+description = "Front-end WebAssembly do interpretador de linguagens do TAPL"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+simple-languages = { path = ".." }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Este crate é a raiz do seu próprio workspace, separado do crate principal.
+[workspace]

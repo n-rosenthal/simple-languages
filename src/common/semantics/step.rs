@@ -25,7 +25,10 @@ use super::derivation::Reduces;
 use super::Rule;
 
 /// Limite de passos de [`run`]. Use [`run_with_fuel`] para outro valor.
-pub const DEFAULT_FUEL: usize = 1_000_000;
+///
+/// É pequeno de propósito: a máquina clona a configuração a cada passo, e
+/// um termo divergente (ω) deve falhar rápido num REPL ou numa página web.
+pub const DEFAULT_FUEL: usize = 10_000;
 
 // =============================================================================
 // Transition
@@ -163,9 +166,24 @@ where
 {
     /// Uma linha por passo, com a regra entre colchetes.
     pub fn to_text(&self) -> String {
+        self.to_text_limited(usize::MAX)
+    }
+
+    /// Como [`Trace::to_text`], mas mostra no máximo `max_steps` passos
+    /// (traces de termos divergentes têm milhares de linhas).
+    pub fn to_text_limited(&self, max_steps: usize) -> String {
         let mut out = format!("{}\n", self.start);
-        for t in &self.steps {
+        let shown = self.steps.len().min(max_steps);
+
+        for t in &self.steps[..shown] {
             out.push_str(&format!("→ {}  [{}]\n", t.to, t.rule));
+        }
+        if self.steps.len() > shown {
+            out.push_str(&format!(
+                "… {} more steps omitted; last state:\n→ {}\n",
+                self.steps.len() - shown,
+                self.final_state
+            ));
         }
         if self.outcome != Outcome::Final {
             out.push_str(&format!("({})\n", self.outcome));
@@ -384,6 +402,16 @@ mod tests {
             trace.to_latex(),
             r"\begin{aligned}(1 + 2) &\xrightarrow{\textsc{E-AddConst}} 3\end{aligned}"
         );
+    }
+
+    #[test]
+    fn long_traces_can_be_truncated() {
+        let trace = run_with_fuel::<Forever>(0, 50);
+        let text = trace.to_text_limited(3);
+
+        assert!(text.starts_with("0\n→ 1  [E-Tick]\n→ 2  [E-Tick]\n→ 3  [E-Tick]\n"));
+        assert!(text.contains("… 47 more steps omitted"));
+        assert!(text.ends_with("→ 50\n(out of fuel)\n"));
     }
 
     #[test]

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TAPL playground</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>TAPL <span>playground</span></h1>
+
+    <label>Linguagem
+      <select id="language"></select>
+    </label>
+    <label>Modo
+      <select id="mode"></select>
+    </label>
+    <label>Passos
+      <input id="fuel" type="number" min="1" max="20000" step="100">
+    </label>
+
+    <span class="spacer"></span>
+    <button id="share" type="button" title="Copia um link com a linguagem, o modo e o termo">Compartilhar</button>
+    <button id="clear" type="button" title="Ctrl+L">Limpar</button>
+  </header>
+
+  <main>
+    <section id="console" aria-label="Console">
+      <div id="log" role="log" aria-live="polite"></div>
+
+      <form id="form" autocomplete="off">
+        <span class="prompt" id="prompt" aria-hidden="true">❯</span>
+        <input id="line" type="text" spellcheck="false" autocapitalize="off"
+               autocorrect="off" aria-label="Termo ou comando" autofocus>
+        <button id="insert-lambda" type="button" title="Inserir λ (ou digite \)">λ</button>
+        <button type="submit">Executar</button>
+      </form>
+    </section>
+
+    <aside aria-label="Exemplos e definições">
+      <p id="description"></p>
+
+      <h2>Exemplos</h2>
+      <ul id="examples"></ul>
+
+      <div id="definitions-panel" hidden>
+        <h2>Definições</h2>
+        <ul id="definitions"></ul>
+      </div>
+
+      <p class="hint">
+        <kbd>↑</kbd> <kbd>↓</kbd> histórico · <kbd>:help</kbd> comandos ·
+        <kbd>:small</kbd> <kbd>:type</kbd> <kbd>:big</kbd> <kbd>:machine</kbd> trocam o modo
+      </p>
+    </aside>
+  </main>
+
+  <noscript>Esta página precisa de JavaScript e WebAssembly.</noscript>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,15 +1,6 @@
-//! Termos da linguagem `arith`.
-//!
-//! Um termo representa uma expressão sintaticamente válida da linguagem.
-
 use std::fmt;
 
-// =============================================================================
-// Operadores binários
-// =============================================================================
-
-/// Operadores binários da linguagem.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -21,98 +12,47 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    /// Retorna a representação textual do operador.
     pub fn symbol(self) -> &'static str {
         match self {
-            Self::Add => "+",
-            Self::Sub => "-",
-            Self::Mul => "*",
-            Self::LessThan => "<",
-            Self::Equal => "==",
-            Self::And => "&&",
-            Self::Or => "||",
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::LessThan => "<",
+            BinaryOp::Equal => "==",
+            BinaryOp::And => "&&",
+            BinaryOp::Or => "||",
         }
     }
 }
 
 impl fmt::Display for BinaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.symbol())
+        f.write_str(self.symbol())
     }
 }
 
-// =============================================================================
-// Term
-// =============================================================================
-
-/// Termos da linguagem `arith`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
-    /// Literal inteiro.
     Integer(i64),
-
-    /// Literal booleano.
     Boolean(bool),
-
-    /// Operação binária.
-    Binary {
-        /// Operador da expressão.
-        op: BinaryOp,
-
-        /// Operando esquerdo.
-        lhs: Box<Term>,
-
-        /// Operando direito.
-        rhs: Box<Term>,
-    },
-
-    /// Expressão condicional.
-    If {
-        /// Condição.
-        condition: Box<Term>,
-
-        /// Ramo executado quando a condição é verdadeira.
-        then_branch: Box<Term>,
-
-        /// Ramo executado quando a condição é falsa.
-        else_branch: Box<Term>,
-    },
+    Binary { op: BinaryOp, lhs: Box<Term>, rhs: Box<Term> },
+    If { condition: Box<Term>, then_branch: Box<Term>, else_branch: Box<Term> },
 }
 
 impl Term {
-    // -------------------------------------------------------------------------
-    // Construtores
-    // -------------------------------------------------------------------------
-
-    /// Cria um literal inteiro.
-    pub fn integer(value: i64) -> Self {
-        Self::Integer(value)
+    pub fn integer(n: i64) -> Self {
+        Self::Integer(n)
     }
 
-    /// Cria um literal booleano.
-    pub fn boolean(value: bool) -> Self {
-        Self::Boolean(value)
+    pub fn boolean(b: bool) -> Self {
+        Self::Boolean(b)
     }
 
-    /// Cria uma expressão binária.
-    pub fn binary(
-        op: BinaryOp,
-        lhs: Self,
-        rhs: Self,
-    ) -> Self {
-        Self::Binary {
-            op,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        }
+    pub fn binary(op: BinaryOp, lhs: Term, rhs: Term) -> Self {
+        Self::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
     }
 
-    /// Cria uma expressão condicional.
-    pub fn if_then_else(
-        condition: Self,
-        then_branch: Self,
-        else_branch: Self,
-    ) -> Self {
+    pub fn if_then_else(condition: Term, then_branch: Term, else_branch: Term) -> Self {
         Self::If {
             condition: Box::new(condition),
             then_branch: Box::new(then_branch),
@@ -120,50 +60,35 @@ impl Term {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Predicados
-    // -------------------------------------------------------------------------
-
-    /// Indica se o termo é uma forma final.
-    ///
-    /// Em `arith`, os únicos valores são literais inteiros e booleanos.
+    /// Valores: literais.
     pub fn is_value(&self) -> bool {
-        matches!(
-            self,
-            Self::Integer(_) | Self::Boolean(_)
-        )
+        matches!(self, Term::Integer(_) | Term::Boolean(_))
     }
 }
 
-// =============================================================================
-// Display
-// =============================================================================
+/// Um operando de operador binário: um `if` precisa de parênteses, porque o
+/// `else` iria engolir o resto da expressão.
+fn operand(f: &mut fmt::Formatter<'_>, term: &Term) -> fmt::Result {
+    match term {
+        Term::If { .. } => write!(f, "({term})"),
+        _ => write!(f, "{term}"),
+    }
+}
 
-/// Representação textual de um termo.
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Integer(value) => {
-                write!(f, "{value}")
+            Term::Integer(n) => write!(f, "{n}"),
+            Term::Boolean(b) => write!(f, "{b}"),
+            Term::Binary { op, lhs, rhs } => {
+                f.write_str("(")?;
+                operand(f, lhs)?;
+                write!(f, " {op} ")?;
+                operand(f, rhs)?;
+                f.write_str(")")
             }
-
-            Self::Boolean(value) => {
-                write!(f, "{value}")
-            }
-
-            Self::Binary { op, lhs, rhs } => {
-                write!(f, "({lhs} {op} {rhs})")
-            }
-
-            Self::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                write!(
-                    f,
-                    "if {condition} then {then_branch} else {else_branch}"
-                )
+            Term::If { condition, then_branch, else_branch } => {
+                write!(f, "if {condition} then {then_branch} else {else_branch}")
             }
         }
     }

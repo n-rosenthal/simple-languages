@@ -122,7 +122,9 @@ impl<V: ToLatex> ToLatex for Store<V> {
     fn to_latex(&self) -> String {
         let cells = self
             .iter()
-            .map(|(location, value)| format!(r"{} \mapsto {}", location.to_latex(), value.to_latex()))
+            .map(|(location, value)| {
+                format!(r"{} \mapsto {}", location.to_latex(), value.to_latex())
+            })
             .collect::<Vec<_>>()
             .join(r",\,");
         format!(r"\{{{cells}\}}")

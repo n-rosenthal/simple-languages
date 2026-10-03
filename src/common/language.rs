@@ -23,9 +23,21 @@ use crate::common::semantics::laws::{
 use crate::common::semantics::{run, BigStep, Step, Typing};
 use crate::common::ToLatex;
 
+/// Um termo de exemplo, com um título, para o REPL e para a página web.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Example {
+    pub title: &'static str,
+    pub source: &'static str,
+}
+
 pub trait Language {
     /// Nome usado no CLI (`tapl lambda ...`).
     const NAME: &'static str;
+    /// Uma linha descrevendo a linguagem.
+    const DESCRIPTION: &'static str = "";
+    /// A linguagem tem variáveis livres, de modo que o interpretador pode
+    /// oferecer definições (`nome = termo`)?
+    const SUPPORTS_DEFINITIONS: bool = false;
 
     type Term: Clone + PartialEq + Display + ToLatex;
     type Type: Clone + PartialEq + Display + ToLatex;
@@ -42,6 +54,17 @@ pub trait Language {
 
     /// Texto → termo (scanner, lexer e parser da linguagem).
     fn parse(source: &str) -> Result<Self::Term, Self::SyntaxError>;
+
+    /// Exemplos mostrados no REPL (`:examples`) e na página web.
+    fn examples() -> &'static [Example] {
+        &[]
+    }
+
+    /// `[name ↦ value] term`: usada pelo interpretador para expandir
+    /// definições. O padrão não substitui nada (linguagens sem variáveis).
+    fn substitute(term: &Self::Term, _name: &str, _value: &Self::Term) -> Self::Term {
+        term.clone()
+    }
 }
 
 /// Roda todas as leis genéricas sobre `term` e devolve os nomes das que

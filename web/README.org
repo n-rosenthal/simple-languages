@@ -1,0 +1,65 @@
+#+title: TAPL playground (WebAssembly)
+
+Um REPL no navegador para as linguagens do TAPL. Todo o interpretador
+(scanner, lexer, parser, tipos, semântica estrutural e natural, máquina
+virtual, definições) é o mesmo código Rust do crate principal, compilado para
+WebAssembly. Este diretório contém só a cola e a página.
+
+* Compilar e rodar
+
+Requisitos: Rust (com o alvo =wasm32-unknown-unknown=) e =wasm-pack=.
+
+#+begin_src sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+./web/build.sh serve        # compila e abre http://localhost:8080
+#+end_src
+
+Sem o script:
+
+#+begin_src sh
+wasm-pack build web --target web --out-dir www/pkg --release
+python3 -m http.server 8080 -d web/www
+#+end_src
+
+A página precisa ser servida por HTTP: o navegador não carrega módulos ES nem
+=.wasm= de =file://=.
+
+* Estrutura
+
+| arquivo             | função                                                         |
+|---------------------+----------------------------------------------------------------|
+| =src/lib.rs=        | =Playground=, =Reply=, =languages()=, =modes()= (=wasm-bindgen=) |
+| =.cargo/config.toml= | pilha de 8 MiB (o padrão do wasm32 é 1 MiB)                    |
+| =www/index.html=    | a página                                                       |
+| =www/main.js=       | liga a interface a =Playground.submit=                         |
+| =www/style.css=     | tema claro/escuro                                              |
+| =www/pkg/=          | saída do =wasm-pack= (não versionada)                          |
+
+* Testes
+
+#+begin_src sh
+cargo test --manifest-path web/Cargo.toml    # a cola, no alvo nativo
+#+end_src
+
+A lógica do interpretador é testada no crate principal (=cargo test=).
+
+* Publicar
+
+Copie =web/www/= (com =pkg/=) para qualquer hospedagem estática, por exemplo
+GitHub Pages. Não há servidor: a execução é toda local.
+
+* Limites
+
+O interpretador roda no navegador, então há limites (em
+=simple_languages::common::interpreter=): linha de até 2 000 caracteres, 100
+níveis de parênteses e no máximo 20 000 passos (=:fuel=). Termos divergentes
+(como \omega) terminam por falta de passos, e a profundidade de big-step de
+=lambda= é limitada a 200.
+
+* Acrescentar uma linguagem
+
+Implemente =Language= no crate principal e registre em =src/registry.rs=
+(=RUNNERS= e =SESSIONS=). A página a lista sozinha: seletor de linguagem,
+exemplos e definições vêm de =Language::examples= e =SUPPORTS_DEFINITIONS=.

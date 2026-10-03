@@ -1,194 +1,215 @@
-// arith/small_step.rs
-use crate::common::{SmallStepEvaluator, Step};
+//! Semântica estrutural de `arith` (TAPL, cap. 3), esquerda para a direita.
+//!
+//! Um termo em que nenhuma regra se aplica e que não é valor (`true + 1`,
+//! `if 1 then ...`) está *travado*: é um resultado normal, não um erro.
 
-use super::evaluator::EvaluationError;
-use super::terms::{BinaryOp, Term};
-use super::values::Value;
+use crate::common::semantics::{Step, Transition};
 
-/// Regras de avaliação small-step de `arith`. Nomenclatura seguindo
-/// a convenção usual: sufixo numérico para regras de congruência
-/// (qual sub-termo está sendo reduzido), sem sufixo para regras de
-/// computação (quando os operandos já são valores).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SmallStepRule {
-    /// t1 → t1'  ⟹  t1 op t2 → t1' op t2
-    BinaryLeft,
-    /// v1 valor, t2 → t2'  ⟹  v1 op t2 → v1 op t2'
-    BinaryRight,
-    /// v1, v2 valores  ⟹  v1 op v2 → resultado
-    BinaryCompute,
-    /// t1 → t1'  ⟹  if t1 then t2 else t3 → if t1' then t2 else t3
-    IfCongruence,
-    /// if true then t2 else t3 → t2
-    IfTrue,
-    /// if false then t2 else t3 → t3
-    IfFalse,
+use super::terms::Term;
+use super::values::{apply, Value};
+
+crate::rules! {
+    pub enum SmallStepRule {
+        /// t1 → t1'  ⟹  t1 op t2 → t1' op t2
+        BinaryLeft => "E-Bin1",
+        /// v1 valor, t2 → t2'  ⟹  v1 op t2 → v1 op t2'
+        BinaryRight => "E-Bin2",
+        /// v1, v2 valores  ⟹  v1 op v2 → resultado
+        BinaryCompute => "E-BinConst",
+        /// t1 → t1'  ⟹  if t1 then t2 else t3 → if t1' then t2 else t3
+        IfCongruence => "E-If",
+        /// if true then t2 else t3 → t2
+        IfTrue => "E-IfTrue",
+        /// if false then t2 else t3 → t3
+        IfFalse => "E-IfFalse",
+    }
 }
-
-// arith/small_step.rs (continuação)
 
 pub struct ArithSmallStep;
 
-impl ArithSmallStep {
-    /// Aplica um operador binário quando os dois lados já são
-    /// valores de superfície, produzindo o termo-resultado.
-    /// Reaproveita `Value`/a lógica de `evaluate_binary` do
-    /// avaliador big-step via conversão pontual — evita duplicar a
-    /// tabela de casos de operadores em dois lugares.
-    fn compute_binary(op: BinaryOp, lhs: &Term, rhs: &Term) -> Result<Term, EvaluationError> {
-        let lhs_value = Self::term_to_value(lhs);
-        let rhs_value = Self::term_to_value(rhs);
-
-        // reaproveita a mesma tabela de casos do big-step
-        let (result, _rule) =
-            super::evaluator::ArithEvaluator::evaluate_binary(op, lhs_value, rhs_value)?;
-
-        Ok(Self::value_to_term(result))
-    }
-
-    fn term_to_value(term: &Term) -> Value {
-        match term {
-            Term::Integer(n) => Value::Integer(*n),
-            Term::Boolean(b) => Value::Boolean(*b),
-            // seguro: só chamado quando `is_value(term)` já foi checado
-            _ => unreachable!("term_to_value chamado sobre termo que não é valor"),
-        }
-    }
-
-    fn value_to_term(value: Value) -> Term {
-        match value {
-            Value::Integer(n) => Term::Integer(n),
-            Value::Boolean(b) => Term::Boolean(b),
-        }
+fn value_of(term: &Term) -> Option<Value> {
+    match term {
+        Term::Integer(n) => Some(Value::Integer(*n)),
+        Term::Boolean(b) => Some(Value::Boolean(*b)),
+        _ => None,
     }
 }
 
-impl SmallStepEvaluator for ArithSmallStep {
-    type Term = Term;
-    type Rule = SmallStepRule;
-    type Error = EvaluationError;
-
-    fn is_value(term: &Term) -> bool {
-        matches!(term, Term::Integer(_) | Term::Boolean(_))
-    }
-
-    fn step(term: &Term) -> Result<Option<Step<SmallStepRule, Term>>, EvaluationError> {
+impl ArithSmallStep {
+    /// A regra mais externa e o termo seguinte, sem montar a `Transition`.
+    ///
+    /// As regras de congruência recorrem a subtermos; se cada nível montasse
+    /// uma `Transition` (clonando o termo), um passo custaria O(n²) numa
+    /// cadeia `1 + 1 + ... + 1`.
+    fn reduce(term: &Term) -> Option<(SmallStepRule, Term)> {
         match term {
-            // valores não têm passo — evaluate_trace() os reconhece
-            // via is_value, não precisa apontar isso aqui.
-            Term::Integer(_) | Term::Boolean(_) => Ok(None),
+            Term::Integer(_) | Term::Boolean(_) => None,
 
             Term::Binary { op, lhs, rhs } => {
-                if !Self::is_value(lhs) {
-                    // E-Bin1: reduz o lado esquerdo primeiro
-                    if let Some(inner) = Self::step(lhs)? {
-                        let next = Term::binary(*op, inner.to.clone(), (**rhs).clone());
-                        return Ok(Some(Step::new(SmallStepRule::BinaryLeft, term.clone(), next)));
-                    }
-                    // lhs não é valor e não tem passo: travado;
-                    // deixa evaluate_trace() detectar via is_value.
-                    return Ok(None);
+                // E-Bin1: reduz o lado esquerdo primeiro. Se ele trava, o termo trava.
+                if !lhs.is_value() {
+                    let (_, inner) = Self::reduce(lhs)?;
+                    let next = Term::binary(*op, inner, (**rhs).clone());
+                    return Some((SmallStepRule::BinaryLeft, next));
                 }
 
-                if !Self::is_value(rhs) {
-                    // E-Bin2: esquerda já é valor, reduz a direita
-                    if let Some(inner) = Self::step(rhs)? {
-                        let next = Term::binary(*op, (**lhs).clone(), inner.to.clone());
-                        return Ok(Some(Step::new(SmallStepRule::BinaryRight, term.clone(), next)));
-                    }
-                    return Ok(None);
+                // E-Bin2: a esquerda já é valor, reduz a direita
+                if !rhs.is_value() {
+                    let (_, inner) = Self::reduce(rhs)?;
+                    let next = Term::binary(*op, (**lhs).clone(), inner);
+                    return Some((SmallStepRule::BinaryRight, next));
                 }
 
-                // E-BinConst: ambos são valores, computa
-                let result = Self::compute_binary(*op, lhs, rhs)?;
-                Ok(Some(Step::new(SmallStepRule::BinaryCompute, term.clone(), result)))
+                // E-BinConst: ambos são valores. Operandos incompatíveis não
+                // têm regra: o termo trava.
+                let result = apply(*op, value_of(lhs)?, value_of(rhs)?)?;
+                Some((SmallStepRule::BinaryCompute, result.into()))
             }
 
-            Term::If { condition, then_branch, else_branch } => match condition.as_ref() {
-                Term::Boolean(true) => {
-                    // E-IfTrue
-                    Ok(Some(Step::new(
-                        SmallStepRule::IfTrue,
-                        term.clone(),
-                        (**then_branch).clone(),
-                    )))
-                }
-                Term::Boolean(false) => {
-                    // E-IfFalse
-                    Ok(Some(Step::new(
-                        SmallStepRule::IfFalse,
-                        term.clone(),
-                        (**else_branch).clone(),
-                    )))
-                }
+            Term::If { condition, then_branch, else_branch } => match **condition {
+                // E-IfTrue / E-IfFalse
+                Term::Boolean(true) => Some((SmallStepRule::IfTrue, (**then_branch).clone())),
+                Term::Boolean(false) => Some((SmallStepRule::IfFalse, (**else_branch).clone())),
+                // `1` como condição: travado
+                Term::Integer(_) => None,
+                // E-If: reduz a condição
                 _ => {
-                    // E-If: reduz a condição
-                    match Self::step(condition)? {
-                        Some(inner) => {
-                            let next = Term::if_then_else(
-                                inner.to.clone(),
-                                (**then_branch).clone(),
-                                (**else_branch).clone(),
-                            );
-                            Ok(Some(Step::new(SmallStepRule::IfCongruence, term.clone(), next)))
-                        }
-                        None => Ok(None), // condição travada (ex.: `1` como condição)
-                    }
+                    let (_, inner) = Self::reduce(condition)?;
+                    let next = Term::if_then_else(
+                        inner,
+                        (**then_branch).clone(),
+                        (**else_branch).clone(),
+                    );
+                    Some((SmallStepRule::IfCongruence, next))
                 }
             },
         }
     }
 }
 
+impl Step for ArithSmallStep {
+    type State = Term;
+    type Rule = SmallStepRule;
+
+    fn is_final(term: &Term) -> bool {
+        term.is_value()
+    }
+
+    fn step(term: &Term) -> Option<Transition<SmallStepRule, Term>> {
+        let (rule, next) = Self::reduce(term)?;
+        Some(Transition::new(rule, term.clone(), next))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::SmallStepEvaluator;
+    use crate::arith::terms::BinaryOp;
+    use crate::common::semantics::run;
+
+    fn int(n: i64) -> Term {
+        Term::integer(n)
+    }
+
+    fn add(l: Term, r: Term) -> Term {
+        Term::binary(BinaryOp::Add, l, r)
+    }
 
     #[test]
     fn single_step_addition() {
-        let term = Term::binary(BinaryOp::Add, Term::integer(1), Term::integer(2));
-        let step = ArithSmallStep::step(&term).unwrap().unwrap();
+        let step = ArithSmallStep::step(&add(int(1), int(2))).unwrap();
         assert_eq!(step.rule, SmallStepRule::BinaryCompute);
-        assert_eq!(step.to, Term::integer(3));
+        assert_eq!(step.to, int(3));
     }
 
     #[test]
     fn trace_reduces_nested_addition_left_to_right() {
-        // (1 + 2) + (3 + 4)
-        let term = Term::binary(
-            BinaryOp::Add,
-            Term::binary(BinaryOp::Add, Term::integer(1), Term::integer(2)),
-            Term::binary(BinaryOp::Add, Term::integer(3), Term::integer(4)),
+        // (1 + 2) + (3 + 4) → 3 + (3 + 4) → 3 + 7 → 10
+        let term = add(add(int(1), int(2)), add(int(3), int(4)));
+        let trace = run::<ArithSmallStep>(term);
+
+        assert!(trace.is_final());
+        assert_eq!(trace.final_state, int(10));
+        assert_eq!(
+            trace.rules(),
+            vec![
+                SmallStepRule::BinaryLeft,
+                SmallStepRule::BinaryRight,
+                SmallStepRule::BinaryCompute
+            ]
         );
-
-        let trace = ArithSmallStep::evaluate_trace(&term).unwrap();
-
-        assert!(!trace.is_stuck);
-        assert_eq!(trace.final_term, Term::integer(10));
-        // (1+2)+(3+4) → 3+(3+4) → 3+7 → 10  :  3 passos
-        assert_eq!(trace.steps.len(), 3);
-        assert_eq!(trace.steps[0].rule, SmallStepRule::BinaryLeft);
-        assert_eq!(trace.steps[1].rule, SmallStepRule::BinaryRight);
-        assert_eq!(trace.steps[2].rule, SmallStepRule::BinaryCompute);
     }
 
     #[test]
     fn if_true_reduces_directly() {
-        let term = Term::if_then_else(Term::boolean(true), Term::integer(10), Term::integer(20));
-        let trace = ArithSmallStep::evaluate_trace(&term).unwrap();
-        assert_eq!(trace.final_term, Term::integer(10));
-        assert_eq!(trace.steps.len(), 1);
-        assert_eq!(trace.steps[0].rule, SmallStepRule::IfTrue);
+        let term = Term::if_then_else(Term::boolean(true), int(10), int(20));
+        let trace = run::<ArithSmallStep>(term);
+
+        assert_eq!(trace.final_state, int(10));
+        assert_eq!(trace.rules(), vec![SmallStepRule::IfTrue]);
+    }
+
+    #[test]
+    fn the_condition_is_reduced_first() {
+        let term = Term::if_then_else(
+            Term::binary(BinaryOp::LessThan, int(1), int(2)),
+            int(10),
+            int(20),
+        );
+        let trace = run::<ArithSmallStep>(term);
+
+        assert_eq!(
+            trace.rules(),
+            vec![SmallStepRule::IfCongruence, SmallStepRule::IfTrue]
+        );
+        assert_eq!(trace.final_state, int(10));
     }
 
     #[test]
     fn stuck_term_is_reported_not_erred() {
-        // true + 1  — trava (não existe regra pra Bool + Int)
-        let term = Term::binary(BinaryOp::Add, Term::boolean(true), Term::integer(1));
-        let trace = ArithSmallStep::evaluate_trace(&term).unwrap();
-        assert!(trace.is_stuck);
-        assert_eq!(trace.final_term, term);
-        assert!(trace.steps.is_empty());
+        // true + 1: não existe regra para Boolean + Integer
+        let term = add(Term::boolean(true), int(1));
+        let trace = run::<ArithSmallStep>(term.clone());
+
+        assert!(trace.is_stuck());
+        assert_eq!(trace.final_state, term);
+        assert!(trace.is_empty());
+    }
+
+    #[test]
+    fn a_stuck_term_is_not_a_value() {
+        let term = add(Term::boolean(true), int(1));
+        assert!(!ArithSmallStep::is_final(&term));
+        assert!(ArithSmallStep::step(&term).is_none());
+    }
+
+    #[test]
+    fn stuckness_propagates_from_subterms() {
+        let term = add(add(Term::boolean(true), int(1)), int(2));
+        assert!(run::<ArithSmallStep>(term).is_stuck());
+    }
+
+    #[test]
+    fn gets_stuck_after_making_progress() {
+        // (1 + 2) + true → 3 + true
+        let trace = run::<ArithSmallStep>(add(add(int(1), int(2)), Term::boolean(true)));
+
+        assert!(trace.is_stuck());
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace.final_state, add(int(3), Term::boolean(true)));
+    }
+
+    #[test]
+    fn non_boolean_condition_is_stuck() {
+        let term = Term::if_then_else(int(1), int(2), int(3));
+        assert!(run::<ArithSmallStep>(term).is_stuck());
+    }
+
+    #[test]
+    fn overflow_wraps_so_well_typed_terms_never_stick() {
+        let trace = run::<ArithSmallStep>(add(int(i64::MAX), int(1)));
+
+        assert!(trace.is_final());
+        assert_eq!(trace.final_state, int(i64::MIN));
     }
 }

@@ -61,13 +61,14 @@ impl Prim {
     }
 
     /// `None` quando os operandos não servem ao operador (o estado trava).
-    /// Estouro aritmético também trava: não há "erro de avaliação" na
-    /// máquina.
+    /// A aritmética dá a volta em 64 bits, como em `arith`: o livro usa
+    /// inteiros sem limite, e estouro travar quebraria o teorema de
+    /// progresso.
     fn apply(self, lhs: Value, rhs: Value) -> Option<Value> {
         match (self, lhs, rhs) {
-            (Prim::Add, Value::Int(a), Value::Int(b)) => a.checked_add(b).map(Value::Int),
-            (Prim::Sub, Value::Int(a), Value::Int(b)) => a.checked_sub(b).map(Value::Int),
-            (Prim::Mul, Value::Int(a), Value::Int(b)) => a.checked_mul(b).map(Value::Int),
+            (Prim::Add, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_add(b))),
+            (Prim::Sub, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_sub(b))),
+            (Prim::Mul, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_mul(b))),
             (Prim::Lt, Value::Int(a), Value::Int(b)) => Some(Value::Bool(a < b)),
             (Prim::Eq, Value::Int(a), Value::Int(b)) => Some(Value::Bool(a == b)),
             (Prim::Eq, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a == b)),
@@ -222,6 +223,7 @@ impl Env {
 // =============================================================================
 // A máquina
 // =============================================================================
+
 /// Retorno pendente de uma chamada ou de um ramo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -230,14 +232,17 @@ pub struct Frame {
     pub env: Env,
 }
 
+/// A pilha de quadros: uma lista encadeada *persistente*. Empilhar e
+/// desempilhar são O(1) e não alteram a pilha original, então clonar uma
+/// [`Config`] (que o trace faz a cada passo) não copia os quadros. Com um
+/// `Vec`, o trace de um termo divergente usaria memória quadrática.
 #[derive(Clone)]
+pub struct Frames(Option<Rc<FrameNode>>);
+
 struct FrameNode {
     frame: Frame,
     parent: Frames,
 }
-
-#[derive(Clone)]
-pub struct Frames(Option<Rc<FrameNode>>);
 
 impl Frames {
     pub fn empty() -> Self {
@@ -249,10 +254,7 @@ impl Frames {
     }
 
     pub fn push(&self, frame: Frame) -> Frames {
-        Frames(Some(Rc::new(FrameNode {
-            frame,
-            parent: self.clone(),
-        })))
+        Frames(Some(Rc::new(FrameNode { frame, parent: self.clone() })))
     }
 
     /// O quadro do topo e o resto da pilha.
@@ -268,7 +270,6 @@ impl Frames {
 
     fn iter(&self) -> impl Iterator<Item = &Frame> {
         let mut next = self.0.as_deref();
-
         std::iter::from_fn(move || {
             let node = next?;
             next = node.parent.0.as_deref();
@@ -287,9 +288,7 @@ impl PartialEq for Frames {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (None, None) => true,
-
-            (Some(a), Some(b)) if Rc::ptr_eq(a, b) => true,
-
+            (Some(a), Some(b)) if Rc::ptr_eq(a, b) => true, // cauda compartilhada
             _ => self.iter().eq(other.iter()),
         }
     }
@@ -303,19 +302,15 @@ impl std::fmt::Debug for Frames {
     }
 }
 
+/// Destruição iterativa: o `Drop` recursivo padrão de uma lista longa de
+/// `Rc` estoura a pilha (um laço de 10 000 chamadas basta).
 impl Drop for Frames {
     fn drop(&mut self) {
         let mut current = self.0.take();
-
         while let Some(rc) = current {
             match Rc::try_unwrap(rc) {
-                Ok(mut node) => {
-                    current = node.parent.0.take();
-                }
-                Err(_) => {
-                    // O restante da lista é compartilhado.
-                    break;
-                }
+                Ok(mut node) => current = node.parent.0.take(),
+                Err(_) => break, // o resto da lista é compartilhado
             }
         }
     }
@@ -509,7 +504,7 @@ impl Machine for Vm {
             pc: 0,
             stack: Vec::new(),
             env: Env::empty(),
-            frames: Frames::default(),
+            frames: Frames::empty(),
             store: Store::new(),
         }
     }
@@ -572,8 +567,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::semantics::toy::{self, ToyBigStep};
     use crate::common::semantics::run;
+    use crate::common::semantics::toy::{self, ToyBigStep};
 
     fn value_of(instructions: Vec<Instr>) -> Option<Value> {
         Vm::execute(&Program::new(instructions)).value
@@ -715,6 +710,47 @@ mod tests {
         assert_eq!(Vm::unload(&Vm::load(&program)), None);
         // final, mas com duas sobras na pilha
         assert_eq!(Vm::execute(&program).value, None);
+    }
+
+    #[test]
+    fn frames_are_persistent_and_drop_iteratively() {
+        let frame = |pc| Frame { code: code(vec![]), pc, env: Env::empty() };
+
+        let base = Frames::empty().push(frame(1));
+        let a = base.push(frame(2));
+        let b = base.push(frame(3));
+
+        assert_eq!(base.len(), 1);
+        assert_eq!(a.pop().map(|(f, _)| f.pc), Some(2));
+        assert_eq!(b.pop().map(|(f, rest)| (f.pc, rest.len())), Some((3, 1)));
+        assert!(a != b);
+        assert!(a == a.clone());
+
+        // uma pilha muito funda não pode estourar a pilha ao ser destruída
+        let mut deep = Frames::empty();
+        for i in 0..200_000 {
+            deep = deep.push(frame(i));
+        }
+        assert_eq!(deep.len(), 200_000);
+        drop(deep);
+    }
+
+    #[test]
+    fn omega_traces_stay_cheap() {
+        // 10 000 passos de um termo divergente: com `Vec` de quadros isto
+        // levava segundos e centenas de MB.
+        let w = code(vec![Instr::Access(0), Instr::Access(0), Instr::Apply]);
+        let program = Program::new(vec![
+            Instr::Closure(w.clone()),
+            Instr::Closure(w),
+            Instr::Apply,
+        ]);
+
+        let started = std::time::Instant::now();
+        let execution = Vm::execute_with_fuel(&program, 10_000);
+
+        assert!(execution.trace.is_out_of_fuel());
+        assert!(started.elapsed().as_secs() < 5);
     }
 
     #[test]

@@ -90,10 +90,7 @@ mod tests {
     #[test]
     fn premises_are_separated_by_double_backslash() {
         let p = vec!["p".to_string(), "q".to_string()];
-        assert_eq!(
-            inference(&p, "c", "L"),
-            r"\inferrule*[right=L]{p \\ q}{c}"
-        );
+        assert_eq!(inference(&p, "c", "L"), r"\inferrule*[right=L]{p \\ q}{c}");
     }
 
     #[test]

@@ -6,15 +6,33 @@
 //! lista.
 //!
 //! Os erros são `String`s já formatadas, com o nome do estágio
-//! (`syntax error: ...`, `type error: ...`). Quando existir um trait
-//! `Diagnostic`, o driver passa a mostrar o trecho do fonte.
+//! (`syntax error: ...`, `type error: ...`).
 
 use std::marker::PhantomData;
 use std::str::FromStr;
 
 use crate::common::language::{law_violations, Language};
 use crate::common::machine_language::{Compile, Vm};
-use crate::common::semantics::{run, BigStep, Machine, Typing};
+use crate::common::semantics::{run_with_fuel, BigStep, Machine, Typing, DEFAULT_FUEL};
+
+// =============================================================================
+// Options
+// =============================================================================
+
+/// Limites de uma execução.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    /// Máximo de passos da semântica estrutural e da máquina.
+    pub fuel: usize,
+    /// Máximo de passos mostrados em um trace (o resto é resumido).
+    pub max_steps_shown: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { fuel: DEFAULT_FUEL, max_steps_shown: 100 }
+    }
+}
 
 // =============================================================================
 // Command
@@ -89,18 +107,35 @@ impl FromStr for Command {
 // =============================================================================
 
 pub fn execute<L: Language>(command: Command, source: &str) -> Result<String, String> {
-    let term = L::parse(source).map_err(|e| format!("syntax error: {e}"))?;
+    execute_with::<L>(command, source, &Options::default())
+}
 
+pub fn execute_with<L: Language>(
+    command: Command,
+    source: &str,
+    options: &Options,
+) -> Result<String, String> {
+    let term = L::parse(source).map_err(|e| format!("syntax error: {e}"))?;
+    execute_term::<L>(command, &term, options)
+}
+
+/// Executa `command` sobre um termo já lido (o interpretador expande as
+/// definições antes de chamar).
+pub fn execute_term<L: Language>(
+    command: Command,
+    term: &L::Term,
+    options: &Options,
+) -> Result<String, String> {
     match command {
         Command::Parse => Ok(format!("{term}\n")),
-        Command::Type => typing::<L>(&term),
-        Command::Small => Ok(small_step::<L>(&term)),
-        Command::Big => big_step::<L>(&term),
-        Command::Latex => Ok(latex::<L>(&term)),
-        Command::Compile => compile::<L>(&term),
-        Command::Machine => machine::<L>(&term, true),
-        Command::Laws => Ok(laws::<L>(&term)),
-        Command::Full => Ok(full::<L>(&term)),
+        Command::Type => typing::<L>(term),
+        Command::Small => Ok(small_step::<L>(term, options)),
+        Command::Big => big_step::<L>(term),
+        Command::Latex => Ok(latex::<L>(term, options)),
+        Command::Compile => compile::<L>(term),
+        Command::Machine => machine::<L>(term, true, options),
+        Command::Laws => Ok(laws::<L>(term)),
+        Command::Full => Ok(full::<L>(term, options)),
     }
 }
 
@@ -115,8 +150,8 @@ fn typing<L: Language>(term: &L::Term) -> Result<String, String> {
     ))
 }
 
-fn small_step<L: Language>(term: &L::Term) -> String {
-    run::<L::Small>(term.clone()).to_text()
+fn small_step<L: Language>(term: &L::Term, options: &Options) -> String {
+    run_with_fuel::<L::Small>(term.clone(), options.fuel).to_text_limited(options.max_steps_shown)
 }
 
 fn big_step<L: Language>(term: &L::Term) -> Result<String, String> {
@@ -137,14 +172,18 @@ fn compile<L: Language>(term: &L::Term) -> Result<String, String> {
     Ok(program.to_string())
 }
 
-fn machine<L: Language>(term: &L::Term, verbose: bool) -> Result<String, String> {
+fn machine<L: Language>(
+    term: &L::Term,
+    verbose: bool,
+    options: &Options,
+) -> Result<String, String> {
     let program =
         <L::Compiler as Compile>::compile(term).map_err(|e| format!("compile error: {e}"))?;
-    let execution = Vm::execute(&program);
+    let execution = Vm::execute_with_fuel(&program, options.fuel);
 
     let mut out = String::new();
     if verbose {
-        out.push_str(&execution.trace.to_text());
+        out.push_str(&execution.trace.to_text_limited(options.max_steps_shown));
     }
     out.push_str(&format!(
         "steps: {}, outcome: {}\n",
@@ -159,7 +198,7 @@ fn machine<L: Language>(term: &L::Term, verbose: bool) -> Result<String, String>
     Ok(out)
 }
 
-fn latex<L: Language>(term: &L::Term) -> String {
+fn latex<L: Language>(term: &L::Term, options: &Options) -> String {
     let mut out = String::new();
 
     match <L::Typing as Typing>::check(term) {
@@ -172,7 +211,7 @@ fn latex<L: Language>(term: &L::Term) -> String {
         Err(e) => out.push_str(&format!("% evaluation error: {e}\n\n")),
     }
 
-    let trace = run::<L::Small>(term.clone());
+    let trace = run_with_fuel::<L::Small>(term.clone(), options.fuel);
     out.push_str(&format!("% small-step\n\\[\n{}\n\\]\n", trace.to_latex()));
 
     out
@@ -201,15 +240,15 @@ fn push_section(out: &mut String, title: &str, body: Result<String, String>) {
 
 /// Todos os estágios. Cada um é independente (os tipos são apagados na
 /// compilação), então um termo mal tipado ainda mostra como trava.
-fn full<L: Language>(term: &L::Term) -> String {
+fn full<L: Language>(term: &L::Term, options: &Options) -> String {
     let mut out = String::new();
 
     push_section(&mut out, "term", Ok(format!("{term}")));
     push_section(&mut out, "type", typing::<L>(term));
-    push_section(&mut out, "small-step", Ok(small_step::<L>(term)));
+    push_section(&mut out, "small-step", Ok(small_step::<L>(term, options)));
     push_section(&mut out, "big-step", big_step::<L>(term));
     push_section(&mut out, "machine code", compile::<L>(term));
-    push_section(&mut out, "machine", machine::<L>(term, false));
+    push_section(&mut out, "machine", machine::<L>(term, false, options));
     push_section(&mut out, "laws", Ok(laws::<L>(term)));
 
     out
