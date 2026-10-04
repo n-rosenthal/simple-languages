@@ -1,6 +1,7 @@
 //! O backbone compartilhado por todas as linguagens.
 
 pub mod source;
+pub mod frontend;
 pub mod latex;
 pub mod context;
 pub mod store;

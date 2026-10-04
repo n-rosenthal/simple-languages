@@ -1,9 +1,7 @@
 //! `lambda` como instância de [`Language`].
 
-use std::fmt;
-
+use crate::common::frontend::{parse_source, FrontendError};
 use crate::common::language::{Example, Language, Syntax};
-use crate::common::{Lexer, Parser, Scanner};
 
 use super::big_step::StlcBigStep;
 use super::compile::StlcCompiler;
@@ -16,42 +14,7 @@ use super::typing::StlcTyping;
 use super::types::Type;
 
 /// O erro de qualquer estágio do front-end.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyntaxError {
-    Scan(ScanError),
-    Lex(LexError),
-    Parse(ParseError),
-}
-
-impl fmt::Display for SyntaxError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Scan(e) => write!(f, "{e}"),
-            Self::Lex(e) => write!(f, "{e}"),
-            Self::Parse(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for SyntaxError {}
-
-impl From<ScanError> for SyntaxError {
-    fn from(e: ScanError) -> Self {
-        Self::Scan(e)
-    }
-}
-
-impl From<LexError> for SyntaxError {
-    fn from(e: LexError) -> Self {
-        Self::Lex(e)
-    }
-}
-
-impl From<ParseError> for SyntaxError {
-    fn from(e: ParseError) -> Self {
-        Self::Parse(e)
-    }
-}
+pub type SyntaxError = FrontendError<ScanError, LexError, ParseError>;
 
 /// O cálculo λ simplesmente tipado com booleanos (TAPL, caps. 9 e 10),
 /// call-by-value.
@@ -123,9 +86,7 @@ impl Language for Stlc {
     type Compiler = StlcCompiler;
 
     fn parse(source: &str) -> Result<Term, SyntaxError> {
-        let lines = StlcScanner::scan(source)?;
-        let tokens = StlcLexer::analyze(&lines)?;
-        Ok(StlcParser::parse(&tokens)?)
+        parse_source::<StlcScanner, StlcLexer, StlcParser>(source)
     }
 
     fn examples() -> &'static [Example] {

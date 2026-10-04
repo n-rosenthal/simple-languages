@@ -1,4 +1,5 @@
-//! Lexer da linguagem `stlc` (cálculo λ simplesmente tipado, com `Bool`).
+//! Lexer da linguagem `stlc` (cálculo λ simplesmente tipado, com `Bool`): uma
+//! tabela para o lexer genérico.
 //!
 //! Tokens reconhecidos:
 //!
@@ -13,141 +14,42 @@
 //! As posições (`Span`) contam `char`s, não bytes: `λ` ocupa 2 bytes em
 //! UTF-8, mas é uma posição.
 
-use std::fmt;
-
-use crate::common::{Lexer, SourceLine, Span};
+use crate::common::frontend::{lex, LexSpec, Words};
+use crate::common::{Lexer, SourceLine};
 
 use super::token::{StlcToken, StlcTokenType};
 
-/// Erros produzidos pelo lexer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LexError {
-    UnexpectedCharacter { character: char, span: Span },
-    /// Um operador de vários caracteres que começou e não terminou
-    /// (`-` sem `>`).
-    UnexpectedEndOfOperator { span: Span },
-}
+pub use crate::common::frontend::LexError;
 
-impl fmt::Display for LexError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedCharacter { character, span } => write!(
-                f,
-                "unexpected character `{character}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnexpectedEndOfOperator { span } => write!(
-                f,
-                "unexpected end of operator at {}..{}",
-                span.start, span.end
-            ),
-        }
-    }
-}
+use StlcTokenType as T;
 
-impl std::error::Error for LexError {}
+const SPEC: LexSpec<StlcTokenType> = LexSpec {
+    keywords: &[
+        ("true", T::True),
+        ("false", T::False),
+        ("if", T::If),
+        ("then", T::Then),
+        ("else", T::Else),
+    ],
+    symbols: &[
+        ("λ", T::Lambda),
+        ("\\", T::Lambda),
+        (".", T::Dot),
+        (":", T::Colon),
+        ("->", T::Arrow),
+        ("(", T::LParen),
+        (")", T::RParen),
+    ],
+    integer: None,
+    words: Words::Identifier(T::Identifier),
+    line_comment: None,
+};
 
 pub struct StlcLexer;
 
 impl StlcLexer {
     pub fn new() -> Self {
         Self
-    }
-
-    fn keyword_type(lexeme: &str) -> Option<StlcTokenType> {
-        match lexeme {
-            "true" => Some(StlcTokenType::True),
-            "false" => Some(StlcTokenType::False),
-            "if" => Some(StlcTokenType::If),
-            "then" => Some(StlcTokenType::Then),
-            "else" => Some(StlcTokenType::Else),
-            _ => None,
-        }
-    }
-
-    fn is_identifier_start(c: char) -> bool {
-        c.is_ascii_alphabetic()
-    }
-
-    fn is_identifier_continue(c: char) -> bool {
-        c.is_ascii_alphanumeric() || c == '_'
-    }
-
-    fn tokenize_line(line: &SourceLine) -> Result<Vec<StlcToken>, LexError> {
-        let chars: Vec<char> = line.text.chars().collect();
-
-        let mut tokens = Vec::new();
-        let mut index = 0;
-
-        while index < chars.len() {
-            let character = chars[index];
-
-            // Espaço em branco
-            if character.is_whitespace() {
-                index += 1;
-                continue;
-            }
-
-            let start = index;
-
-            // Identificador: letra (letra | dígito | '_')*
-            if Self::is_identifier_start(character) {
-                index += 1;
-                while index < chars.len() && Self::is_identifier_continue(chars[index]) {
-                    index += 1;
-                }
-
-                let lexeme: String = chars[start..index].iter().collect();
-                let kind = Self::keyword_type(&lexeme).unwrap_or(StlcTokenType::Identifier);
-                tokens.push(StlcToken::new(kind, lexeme, Span::new(start, index)));
-                continue;
-            }
-
-            // Seta: '->' (um '-' sozinho é um operador incompleto)
-            if character == '-' {
-                if index + 1 < chars.len() && chars[index + 1] == '>' {
-                    index += 2;
-                    tokens.push(StlcToken::new(
-                        StlcTokenType::Arrow,
-                        "->",
-                        Span::new(start, index),
-                    ));
-                    continue;
-                }
-
-                return Err(LexError::UnexpectedEndOfOperator {
-                    span: Span::new(start, start + 1),
-                });
-            }
-
-            // Tokens de um caractere
-            let kind = match character {
-                'λ' | '\\' => Some(StlcTokenType::Lambda),
-                '.' => Some(StlcTokenType::Dot),
-                ':' => Some(StlcTokenType::Colon),
-                '(' => Some(StlcTokenType::LParen),
-                ')' => Some(StlcTokenType::RParen),
-                _ => None,
-            };
-
-            if let Some(kind) = kind {
-                index += 1;
-                tokens.push(StlcToken::new(
-                    kind,
-                    character.to_string(),
-                    Span::new(start, index),
-                ));
-                continue;
-            }
-
-            // Caractere desconhecido
-            return Err(LexError::UnexpectedCharacter {
-                character,
-                span: Span::new(start, start + 1),
-            });
-        }
-
-        Ok(tokens)
     }
 }
 
@@ -161,12 +63,8 @@ impl Lexer for StlcLexer {
     type Token = StlcToken;
     type Error = LexError;
 
-    fn analyze(input: &[SourceLine]) -> Result<Vec<Self::Token>, Self::Error> {
-        let mut tokens = Vec::new();
-        for line in input {
-            tokens.extend(Self::tokenize_line(line)?);
-        }
-        Ok(tokens)
+    fn analyze(input: &[SourceLine]) -> Result<Vec<StlcToken>, LexError> {
+        lex(&SPEC, input)
     }
 }
 

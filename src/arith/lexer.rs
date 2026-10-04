@@ -1,163 +1,47 @@
-//! Lexer de `arith`.
+//! Lexer de `arith`: uma tabela para o lexer genérico.
 //!
-//! Tokens: inteiros, `true`/`false`, `if`/`then`/`else`, `+ - * <`,
-//! `==`, `&&`, `||` e parênteses. Qualquer outra palavra é um erro:
-//! `arith` não tem variáveis.
+//! Tokens: inteiros, `true`/`false`, `if`/`then`/`else`, `+ - * <`, `==`,
+//! `&&`, `||` e parênteses. Qualquer outra palavra é um erro: `arith` não tem
+//! variáveis.
 
-use std::fmt;
-
-use crate::common::{Lexer, SourceLine, Span};
+use crate::common::frontend::{lex, LexSpec, Words};
+use crate::common::{Lexer, SourceLine};
 
 use super::token::{ArithToken, ArithTokenType};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LexError {
-    UnexpectedCharacter { character: char, span: Span },
-    /// Uma palavra que não é palavra-chave (`arith` não tem variáveis).
-    UnknownWord { word: String, span: Span },
-    /// Um operador de dois caracteres que não terminou (`=` sem `=`).
-    UnexpectedEndOfOperator { span: Span },
-}
+pub use crate::common::frontend::LexError;
 
-impl fmt::Display for LexError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedCharacter { character, span } => write!(
-                f,
-                "unexpected character `{character}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnknownWord { word, span } => write!(
-                f,
-                "unknown word `{word}` at {}..{} (arith has no variables)",
-                span.start, span.end
-            ),
-            Self::UnexpectedEndOfOperator { span } => write!(
-                f,
-                "unexpected end of operator at {}..{}",
-                span.start, span.end
-            ),
-        }
-    }
-}
+use ArithTokenType as T;
 
-impl std::error::Error for LexError {}
+const SPEC: LexSpec<ArithTokenType> = LexSpec {
+    keywords: &[
+        ("true", T::Boolean),
+        ("false", T::Boolean),
+        ("if", T::If),
+        ("then", T::Then),
+        ("else", T::Else),
+    ],
+    symbols: &[
+        ("+", T::Plus),
+        ("-", T::Minus),
+        ("*", T::Star),
+        ("<", T::LessThan),
+        ("==", T::Equal),
+        ("&&", T::And),
+        ("||", T::Or),
+        ("(", T::LeftParen),
+        (")", T::RightParen),
+    ],
+    integer: Some(T::Integer),
+    words: Words::Reject("arith has no variables"),
+    line_comment: None,
+};
 
 pub struct ArithLexer;
 
 impl ArithLexer {
     pub fn new() -> Self {
         Self
-    }
-
-    fn keyword_type(lexeme: &str) -> Option<ArithTokenType> {
-        match lexeme {
-            "true" | "false" => Some(ArithTokenType::Boolean),
-            "if" => Some(ArithTokenType::If),
-            "then" => Some(ArithTokenType::Then),
-            "else" => Some(ArithTokenType::Else),
-            _ => None,
-        }
-    }
-
-    /// `==`, `&&` ou `||`: o mesmo caractere duas vezes.
-    fn doubled(
-        chars: &[char],
-        index: usize,
-        kind: ArithTokenType,
-        lexeme: &'static str,
-    ) -> Result<(ArithToken, usize), LexError> {
-        if chars.get(index + 1) == Some(&chars[index]) {
-            let token = ArithToken::new(kind, lexeme, Span::new(index, index + 2));
-            Ok((token, index + 2))
-        } else {
-            Err(LexError::UnexpectedEndOfOperator { span: Span::new(index, index + 1) })
-        }
-    }
-
-    fn tokenize_line(line: &SourceLine) -> Result<Vec<ArithToken>, LexError> {
-        let chars: Vec<char> = line.text.chars().collect();
-        let mut tokens = Vec::new();
-        let mut index = 0;
-
-        while index < chars.len() {
-            let character = chars[index];
-            let start = index;
-
-            if character.is_whitespace() {
-                index += 1;
-                continue;
-            }
-
-            // Inteiro
-            if character.is_ascii_digit() {
-                while index < chars.len() && chars[index].is_ascii_digit() {
-                    index += 1;
-                }
-                let lexeme: String = chars[start..index].iter().collect();
-                tokens.push(ArithToken::new(
-                    ArithTokenType::Integer,
-                    lexeme,
-                    Span::new(start, index),
-                ));
-                continue;
-            }
-
-            // Palavra-chave (qualquer outra palavra é um erro)
-            if character.is_ascii_alphabetic() {
-                while index < chars.len() && chars[index].is_ascii_alphanumeric() {
-                    index += 1;
-                }
-                let lexeme: String = chars[start..index].iter().collect();
-
-                match Self::keyword_type(&lexeme) {
-                    Some(kind) => {
-                        tokens.push(ArithToken::new(kind, lexeme, Span::new(start, index)))
-                    }
-                    None => {
-                        return Err(LexError::UnknownWord {
-                            word: lexeme,
-                            span: Span::new(start, index),
-                        })
-                    }
-                }
-                continue;
-            }
-
-            // Operadores de dois caracteres
-            let doubled = match character {
-                '=' => Some((ArithTokenType::Equal, "==")),
-                '&' => Some((ArithTokenType::And, "&&")),
-                '|' => Some((ArithTokenType::Or, "||")),
-                _ => None,
-            };
-            if let Some((kind, lexeme)) = doubled {
-                let (token, next) = Self::doubled(&chars, index, kind, lexeme)?;
-                tokens.push(token);
-                index = next;
-                continue;
-            }
-
-            // Operadores de um caractere
-            let kind = match character {
-                '+' => ArithTokenType::Plus,
-                '-' => ArithTokenType::Minus,
-                '*' => ArithTokenType::Star,
-                '<' => ArithTokenType::LessThan,
-                '(' => ArithTokenType::LeftParen,
-                ')' => ArithTokenType::RightParen,
-                _ => {
-                    return Err(LexError::UnexpectedCharacter {
-                        character,
-                        span: Span::new(start, start + 1),
-                    })
-                }
-            };
-            index += 1;
-            tokens.push(ArithToken::new(kind, character.to_string(), Span::new(start, index)));
-        }
-
-        Ok(tokens)
     }
 }
 
@@ -172,11 +56,7 @@ impl Lexer for ArithLexer {
     type Error = LexError;
 
     fn analyze(input: &[SourceLine]) -> Result<Vec<ArithToken>, LexError> {
-        let mut tokens = Vec::new();
-        for line in input {
-            tokens.extend(Self::tokenize_line(line)?);
-        }
-        Ok(tokens)
+        lex(&SPEC, input)
     }
 }
 
@@ -240,10 +120,13 @@ mod tests {
 
     #[test]
     fn unknown_words_are_errors() {
-        assert_eq!(
+        use crate::common::Span;
+
+        assert!(matches!(
             error("1 + foo"),
-            LexError::UnknownWord { word: "foo".into(), span: Span::new(4, 7) }
-        );
+            LexError::UnknownWord { ref word, span, .. }
+                if word == "foo" && span == Span::new(4, 7)
+        ));
     }
 
     #[test]

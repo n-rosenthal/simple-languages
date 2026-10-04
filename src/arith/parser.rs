@@ -10,14 +10,16 @@
 //! `||`, `&&`, `==`, `<`, `+ -`, `*`. Um `if` como operando precisa de
 //! parênteses.
 
-use std::fmt;
-
-use crate::common::{Parser, Span};
+use crate::common::frontend::{parse_binary, parse_complete, parse_integer};
+use crate::common::Parser;
 
 use super::terms::{BinaryOp, Term};
 use super::token::{ArithToken, ArithTokenType};
 
 use ArithTokenType as T;
+
+pub type TokenStream<'a> = crate::common::frontend::TokenStream<'a, ArithTokenType>;
+pub type ParseError = crate::common::frontend::ParseError<ArithTokenType>;
 
 const LEVELS: &[&[(ArithTokenType, BinaryOp)]] = &[
     &[(T::Or, BinaryOp::Or)],
@@ -27,111 +29,6 @@ const LEVELS: &[&[(ArithTokenType, BinaryOp)]] = &[
     &[(T::Plus, BinaryOp::Add), (T::Minus, BinaryOp::Sub)],
     &[(T::Star, BinaryOp::Mul)],
 ];
-
-// =============================================================================
-// TokenStream
-// =============================================================================
-
-pub struct TokenStream<'a> {
-    tokens: &'a [ArithToken],
-    position: usize,
-}
-
-impl<'a> TokenStream<'a> {
-    pub fn new(tokens: &'a [ArithToken]) -> Self {
-        Self { tokens, position: 0 }
-    }
-
-    pub fn peek(&self) -> Option<&'a ArithToken> {
-        self.tokens.get(self.position)
-    }
-
-    pub fn peek_kind(&self) -> Option<ArithTokenType> {
-        self.peek().map(|token| token.kind)
-    }
-
-    pub fn next(&mut self) -> Option<&'a ArithToken> {
-        let token = self.tokens.get(self.position);
-        if token.is_some() {
-            self.position += 1;
-        }
-        token
-    }
-
-    pub fn expect(&mut self, expected: ArithTokenType) -> Result<ArithToken, ParseError> {
-        match self.next() {
-            Some(token) if token.kind == expected => Ok(token.clone()),
-            Some(token) => Err(ParseError::UnexpectedToken {
-                expected: Some(expected),
-                found: token.kind,
-                span: token.span,
-            }),
-            None => Err(ParseError::UnexpectedEnd { expected: Some(expected) }),
-        }
-    }
-}
-
-// =============================================================================
-// ParseError
-// =============================================================================
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseError {
-    UnexpectedToken {
-        expected: Option<ArithTokenType>,
-        found: ArithTokenType,
-        span: Span,
-    },
-    UnexpectedEnd {
-        expected: Option<ArithTokenType>,
-    },
-    UnexpectedTrailingToken {
-        found: ArithTokenType,
-        span: Span,
-    },
-    /// Um literal que não cabe em `i64`.
-    InvalidInteger {
-        lexeme: String,
-        span: Span,
-    },
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedToken { expected: Some(expected), found, span } => write!(
-                f,
-                "expected `{expected:?}`, found `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnexpectedToken { expected: None, found, span } => write!(
-                f,
-                "unexpected token `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnexpectedEnd { expected: Some(expected) } => {
-                write!(f, "expected `{expected:?}`, found end of input")
-            }
-            Self::UnexpectedEnd { expected: None } => write!(f, "unexpected end of input"),
-            Self::UnexpectedTrailingToken { found, span } => write!(
-                f,
-                "unexpected trailing token `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::InvalidInteger { lexeme, span } => write!(
-                f,
-                "integer `{lexeme}` at {}..{} does not fit in 64 bits",
-                span.start, span.end
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-// =============================================================================
-// Parser
-// =============================================================================
 
 pub struct ArithParser;
 
@@ -143,7 +40,7 @@ impl ArithParser {
     /// term ::= "if" term "then" term "else" term | binary(0)
     fn parse_term(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
         if stream.peek_kind() != Some(T::If) {
-            return Self::parse_binary(stream, 0);
+            return parse_binary(stream, LEVELS, &Self::parse_primary, &Term::binary);
         }
 
         stream.next();
@@ -156,44 +53,12 @@ impl ArithParser {
         Ok(Term::if_then_else(condition, then_branch, else_branch))
     }
 
-    /// binary(n) ::= binary(n+1) (OP_n binary(n+1))*
-    fn parse_binary(stream: &mut TokenStream<'_>, level: usize) -> Result<Term, ParseError> {
-        if level == LEVELS.len() {
-            return Self::parse_primary(stream);
-        }
-
-        let mut lhs = Self::parse_binary(stream, level + 1)?;
-
-        while let Some(op) = stream.peek_kind().and_then(|kind| {
-            LEVELS[level]
-                .iter()
-                .find(|(token, _)| *token == kind)
-                .map(|(_, op)| *op)
-        }) {
-            stream.next();
-            let rhs = Self::parse_binary(stream, level + 1)?;
-            lhs = Term::binary(op, lhs, rhs);
-        }
-
-        Ok(lhs)
-    }
-
     /// primary ::= INTEGER | BOOLEAN | "(" term ")"
     fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
-        let token = match stream.next() {
-            Some(token) => token.clone(),
-            None => return Err(ParseError::UnexpectedEnd { expected: None }),
-        };
+        let token = stream.advance()?;
 
         match token.kind {
-            T::Integer => token
-                .lexeme
-                .parse::<i64>()
-                .map(Term::integer)
-                .map_err(|_| ParseError::InvalidInteger {
-                    lexeme: token.lexeme.clone(),
-                    span: token.span,
-                }),
+            T::Integer => parse_integer(&token).map(Term::integer),
 
             T::Boolean => Ok(Term::boolean(token.lexeme == "true")),
 
@@ -212,17 +77,7 @@ impl ArithParser {
     }
 
     pub fn parse_tokens(&self, tokens: &[ArithToken]) -> Result<Term, ParseError> {
-        let mut stream = TokenStream::new(tokens);
-        let term = Self::parse_term(&mut stream)?;
-
-        if let Some(token) = stream.peek() {
-            return Err(ParseError::UnexpectedTrailingToken {
-                found: token.kind,
-                span: token.span,
-            });
-        }
-
-        Ok(term)
+        parse_complete(tokens, Self::parse_term)
     }
 }
 

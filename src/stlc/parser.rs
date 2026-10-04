@@ -11,112 +11,15 @@
 //! atype       ::= IDENT | "(" type ")"
 //! ```
 
-use std::fmt;
-
-use crate::common::{Parser, Span};
+use crate::common::frontend::parse_complete;
+use crate::common::Parser;
 
 use super::terms::Term;
 use super::token::{StlcToken, StlcTokenType};
 use super::types::Type;
 
-// =============================================================================
-// TokenStream
-// =============================================================================
-
-pub struct TokenStream<'a> {
-    tokens: &'a [StlcToken],
-    position: usize,
-}
-
-impl<'a> TokenStream<'a> {
-    pub fn new(tokens: &'a [StlcToken]) -> Self {
-        Self { tokens, position: 0 }
-    }
-
-    pub fn peek(&self) -> Option<&'a StlcToken> {
-        self.tokens.get(self.position)
-    }
-
-    pub fn peek_kind(&self) -> Option<StlcTokenType> {
-        self.peek().map(|token| token.kind)
-    }
-
-    pub fn next(&mut self) -> Option<&'a StlcToken> {
-        let token = self.tokens.get(self.position);
-        if token.is_some() {
-            self.position += 1;
-        }
-        token
-    }
-
-    pub fn is_at_end(&self) -> bool {
-        self.position >= self.tokens.len()
-    }
-
-    pub fn position(&self) -> usize {
-        self.position
-    }
-
-    pub fn expect(&mut self, expected: StlcTokenType) -> Result<StlcToken, ParseError> {
-        match self.next() {
-            Some(token) if token.kind == expected => Ok(token.clone()),
-            Some(token) => Err(ParseError::UnexpectedToken {
-                expected: Some(expected),
-                found: token.kind,
-                span: token.span,
-            }),
-            None => Err(ParseError::UnexpectedEnd { expected: Some(expected) }),
-        }
-    }
-}
-
-// =============================================================================
-// ParseError
-// =============================================================================
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseError {
-    UnexpectedToken {
-        expected: Option<StlcTokenType>,
-        found: StlcTokenType,
-        span: Span,
-    },
-    UnexpectedEnd {
-        expected: Option<StlcTokenType>,
-    },
-    UnexpectedTrailingToken {
-        found: StlcTokenType,
-        span: Span,
-    },
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedToken { expected: Some(expected), found, span } => write!(
-                f,
-                "expected `{expected:?}`, found `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnexpectedToken { expected: None, found, span } => write!(
-                f,
-                "unexpected token `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-            Self::UnexpectedEnd { expected: Some(expected) } => {
-                write!(f, "expected `{expected:?}`, found end of input")
-            }
-            Self::UnexpectedEnd { expected: None } => write!(f, "unexpected end of input"),
-            Self::UnexpectedTrailingToken { found, span } => write!(
-                f,
-                "unexpected trailing token `{found:?}` at {}..{}",
-                span.start, span.end
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
+pub type TokenStream<'a> = crate::common::frontend::TokenStream<'a, StlcTokenType>;
+pub type ParseError = crate::common::frontend::ParseError<StlcTokenType>;
 
 // =============================================================================
 // Parser
@@ -157,10 +60,7 @@ impl StlcParser {
             _ => {}
         }
 
-        let token = match stream.next() {
-            Some(token) => token.clone(),
-            None => return Err(ParseError::UnexpectedEnd { expected: None }),
-        };
+        let token = stream.advance()?;
 
         match token.kind {
             StlcTokenType::Identifier => Ok(Term::variable(token.lexeme)),
@@ -220,10 +120,7 @@ impl StlcParser {
 
     /// atype ::= IDENT | "(" type ")"
     fn parse_atomic_type(stream: &mut TokenStream<'_>) -> Result<Type, ParseError> {
-        let token = match stream.next() {
-            Some(token) => token.clone(),
-            None => return Err(ParseError::UnexpectedEnd { expected: None }),
-        };
+        let token = stream.advance()?;
 
         match token.kind {
             StlcTokenType::Identifier => Ok(Type::base(token.lexeme)),
@@ -243,17 +140,7 @@ impl StlcParser {
     }
 
     pub fn parse_tokens(&self, tokens: &[StlcToken]) -> Result<Term, ParseError> {
-        let mut stream = TokenStream::new(tokens);
-        let term = Self::parse_term(&mut stream)?;
-
-        if let Some(token) = stream.peek() {
-            return Err(ParseError::UnexpectedTrailingToken {
-                found: token.kind,
-                span: token.span,
-            });
-        }
-
-        Ok(term)
+        parse_complete(tokens, Self::parse_term)
     }
 }
 

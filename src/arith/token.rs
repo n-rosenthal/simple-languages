@@ -1,6 +1,6 @@
 //! Tokens de `arith`.
 
-use crate::common::Span;
+use crate::common::frontend::Token;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArithTokenType {
@@ -23,15 +23,4 @@ pub enum ArithTokenType {
     RightParen,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArithToken {
-    pub kind: ArithTokenType,
-    pub lexeme: String,
-    pub span: Span,
-}
-
-impl ArithToken {
-    pub fn new(kind: ArithTokenType, lexeme: impl Into<String>, span: Span) -> Self {
-        Self { kind, lexeme: lexeme.into(), span }
-    }
-}
+pub type ArithToken = Token<ArithTokenType>;

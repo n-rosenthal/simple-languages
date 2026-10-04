@@ -1,12 +1,114 @@
-   0.023249057s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: dependency on `simple_languages` is newer than we are 1791075857.793956673s > 1791033195.114677223s "/home/nrdc/org/roam/projects/programming/simple-languages"
-   0.023416470s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
-   0.023447373s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDependency { unit: UnitIndex(0), dep_mtime: FileTime { seconds: 1791075857, nanos: 793956673 }, max_mtime: FileTime { seconds: 1791033195, nanos: 114677223 } })
-   0.023943616s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: stale: changed "/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs"
-   0.023959182s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:           (vs) "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-f40699968e60b46d/dep-test-bin-simple-languages"
-   0.023966472s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1791075938, nanos: 6839350 } < FileTime { seconds: 1791075959, nanos: 206056898 }
-   0.024012507s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
-   0.024027971s  INFO prepare_target{force=false package_id=simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-f40699968e60b46d/dep-test-bin-simple-languages", reference_mtime: FileTime { seconds: 1791075938, nanos: 6839350 }, stale: "/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", stale_mtime: FileTime { seconds: 1791075959, nanos: 206056898 } }))
-    Checking simple-languages v1.2.0 (/home/nrdc/org/roam/projects/programming/simple-languages)
+   0.007250804s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint: stale: changed "/home/nrdc/org/roam/projects/programming/simple-languages/src/common/store.rs"
+   0.007259450s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:           (vs) "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-2601c41111210ae0/dep-lib-simple_languages"
+   0.007262270s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1791113624, nanos: 867225342 } < FileTime { seconds: 1791113690, nanos: 231012177 }
+   0.007295180s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("simple_languages", ["lib"], "/home/nrdc/org/roam/projects/programming/simple-languages/src/lib.rs", Edition2021) }
+   0.007303443s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-2601c41111210ae0/dep-lib-simple_languages", reference_mtime: FileTime { seconds: 1791113624, nanos: 867225342 }, stale: "/home/nrdc/org/roam/projects/programming/simple-languages/src/common/store.rs", stale_mtime: FileTime { seconds: 1791113690, nanos: 231012177 } }))
+   0.007461784s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint: stale: changed "/home/nrdc/org/roam/projects/programming/simple-languages/src/common/semantics/laws.rs"
+   0.007465313s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:           (vs) "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-5d4fe1cbf9c42684/dep-test-lib-simple_languages"
+   0.007467446s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1791113624, nanos: 867225342 } < FileTime { seconds: 1791113690, nanos: 227012251 }
+   0.007482198s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("simple_languages", ["lib"], "/home/nrdc/org/roam/projects/programming/simple-languages/src/lib.rs", Edition2021) }
+   0.007487689s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple_languages"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-5d4fe1cbf9c42684/dep-test-lib-simple_languages", reference_mtime: FileTime { seconds: 1791113624, nanos: 867225342 }, stale: "/home/nrdc/org/roam/projects/programming/simple-languages/src/common/semantics/laws.rs", stale_mtime: FileTime { seconds: 1791113690, nanos: 227012251 } }))
+   0.007591050s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
+   0.007596830s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-e207babec483f6f3/bin-simple-languages`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: cargo_util::paths::read_bytes
+   1: cargo_util::paths::read
+   2: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::main
+  12: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  13: std::rt::lang_start::<()>::{closure#0}
+  14: <&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:287:21
+  15: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync, i32>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:581:40
+  16: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:544:19
+  17: std::panic::catch_unwind::<&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync, i32>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panic.rs:359:14
+  18: std::rt::lang_start_internal::{closure#0}
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/rt.rs:175:24
+  19: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:544:19
+  21: std::panic::catch_unwind::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panic.rs:359:14
+  22: std::rt::lang_start_internal
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/rt.rs:171:5
+  23: main
+  24: __libc_start_call_main
+             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+  25: __libc_start_main_impl
+             at ./csu/../csu/libc-start.c:392:3
+  26: <unknown>
+   0.071085228s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
+   0.071100487s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-6c1fccb8b25ca571/test-bin-simple-languages`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: cargo_util::paths::read_bytes
+   1: cargo_util::paths::read
+   2: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::main
+  12: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  13: std::rt::lang_start::<()>::{closure#0}
+  14: <&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:287:21
+  15: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync, i32>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:581:40
+  16: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:544:19
+  17: std::panic::catch_unwind::<&dyn core::ops::function::Fn<(), Output = i32> + core::panic::unwind_safe::RefUnwindSafe + core::marker::Sync, i32>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panic.rs:359:14
+  18: std::rt::lang_start_internal::{closure#0}
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/rt.rs:175:24
+  19: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:544:19
+  21: std::panic::catch_unwind::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panic.rs:359:14
+  22: std::rt::lang_start_internal
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/rt.rs:171:5
+  23: main
+  24: __libc_start_call_main
+             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+  25: __libc_start_main_impl
+             at ./csu/../csu/libc-start.c:392:3
+  26: <unknown>
+   0.071346399s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="tapl"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name: "tapl", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/bin/tapl.rs", Edition2021) }
+   0.071354747s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="tapl"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDepFingerprint { unit: UnitIndex(0) })
+   0.071516477s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="tapl"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name: "tapl", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/bin/tapl.rs", Edition2021) }
+   0.071523790s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="tapl"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDepFingerprint { unit: UnitIndex(0) })
+   0.071631026s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="interpreter"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { kind: "test", name: "interpreter", benched: false, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/tests/interpreter.rs", Edition2021) }
+   0.071637930s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="interpreter"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDepFingerprint { unit: UnitIndex(0) })
+   0.071743185s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="dump_latex"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { kind: "example", name: "dump_latex", tested: false, benched: false, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/examples/dump_latex.rs", Edition2021) }
+   0.071749833s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="dump_latex"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDepFingerprint { unit: UnitIndex(0) })
+   0.071844407s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="stlc"}: cargo::core::compiler::fingerprint: fingerprint dirty for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { kind: "example", name: "stlc", tested: false, benched: false, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/examples/stlc.rs", Edition2021) }
+   0.071860342s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="stlc"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDepFingerprint { unit: UnitIndex(0) })
+    Checking simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)
 error: could not compile `simple-languages` (bin "simple-languages") due to 10 previous errors; 3 warnings emitted
 warning: build failed, waiting for other jobs to finish...
 error: could not compile `simple-languages` (bin "simple-languages" test) due to 10 previous errors; 3 warnings emitted

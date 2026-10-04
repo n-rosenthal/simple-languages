@@ -1,6 +1,6 @@
 //! Tokens de `stlc` (cálculo λ simplesmente tipado, com `Bool`).
 
-use crate::common::Span;
+use crate::common::frontend::Token;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StlcTokenType {
@@ -30,15 +30,4 @@ pub enum StlcTokenType {
     Else,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StlcToken {
-    pub kind: StlcTokenType,
-    pub lexeme: String,
-    pub span: Span,
-}
-
-impl StlcToken {
-    pub fn new(kind: StlcTokenType, lexeme: impl Into<String>, span: Span) -> Self {
-        Self { kind, lexeme: lexeme.into(), span }
-    }
-}
+pub type StlcToken = Token<StlcTokenType>;
