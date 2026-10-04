@@ -1,4 +1,4 @@
-//! Tipagem de `arith`: o julgamento `⊢ t : T` (termos fechados, sem Γ).
+//! Tipagem de `arith-extensions`: o julgamento `⊢ t : T` (termos fechados, sem Γ).
 
 use std::fmt;
 
@@ -23,6 +23,16 @@ crate::rules! {
             [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
                 => r"\vdash t_1 \times t_2 : \mathsf{Integer}"
         },
+
+        Div => "T-Div" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 / t_2 : \mathsf{Integer}"
+        },
+        Mod => "T-Mod" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 \bmod t_2 : \mathsf{Integer}"
+        },
+
         LessThan => "T-Lt" {
             [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
                 => r"\vdash t_1 < t_2 : \mathsf{Boolean}"
@@ -90,6 +100,12 @@ impl ArithTyping {
             (BinaryOp::Equal, l, r) if l == r => Ok((Boolean, TypingRule::Equal)),
             (BinaryOp::And, Boolean, Boolean) => Ok((Boolean, TypingRule::And)),
             (BinaryOp::Or, Boolean, Boolean) => Ok((Boolean, TypingRule::Or)),
+
+            /// Regras de divisão (Div, Mod) para inteiros
+            /// sem verificação de divisão por zero, que é feita em tempo de execução.
+            (BinaryOp::Div, Integer, Integer) => Ok((Integer, TypingRule::Div)),
+            (BinaryOp::Mod, Integer, Integer) => Ok((Integer, TypingRule::Mod)),
+
             _ => Err(TypeError::InvalidBinaryOperands { op, lhs, rhs }),
         }
     }

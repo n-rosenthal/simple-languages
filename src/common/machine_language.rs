@@ -17,6 +17,13 @@
 //! Cada linguagem implementa [`Compile`]; a lei
 //! [`compilation_is_correct`] confere o resultado contra a semântica
 //! natural.
+//! 
+//! 
+//! 
+//! 
+//! `arith-extensions` é a primeira linguagem a implementar divisão e
+//! módulo. A partir de agora, a linguagem de máquina permite
+//! operações de divisão inteira e módulo (resto).
 
 use std::fmt;
 use std::rc::Rc;
@@ -45,6 +52,9 @@ pub enum Prim {
     Eq,
     And,
     Or,
+
+    Div,
+    Mod,
 }
 
 impl Prim {
@@ -57,6 +67,9 @@ impl Prim {
             Prim::Eq => "eq",
             Prim::And => "and",
             Prim::Or => "or",
+
+            Prim::Div => "div",
+            Prim::Mod => "mod",
         }
     }
 
@@ -74,6 +87,9 @@ impl Prim {
             (Prim::Eq, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a == b)),
             (Prim::And, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a && b)),
             (Prim::Or, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a || b)),
+
+            (Prim::Div, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_div(b))),
+            (Prim::Mod, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_rem(b))),
             _ => None,
         }
     }

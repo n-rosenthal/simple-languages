@@ -1,4 +1,4 @@
-//! Semântica estrutural de `arith` (TAPL, cap. 3), esquerda para a direita.
+//! Semântica estrutural de `arith-extensions` (TAPL, cap. 3), esquerda para a direita.
 //!
 //! Um termo em que nenhuma regra se aplica e que não é valor (`true + 1`,
 //! `if 1 then ...`) está *travado*: é um resultado normal, não um erro.
@@ -117,7 +117,7 @@ impl Step for ArithSmallStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arith::terms::BinaryOp;
+    use crate::arith_extensions::terms::BinaryOp;
     use crate::common::semantics::run;
 
     fn int(n: i64) -> Term {

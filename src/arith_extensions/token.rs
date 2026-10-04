@@ -1,4 +1,4 @@
-//! Tokens de `arith`.
+//! Tokens de `arith-extensions`.
 
 use crate::common::frontend::Token;
 
@@ -11,6 +11,10 @@ pub enum ArithTokenType {
     Else,
     Plus,
     Minus,
+
+    Slash,        /// `/`
+    Percent,        /// `%`
+
     Star,
     LessThan,
     /// `==`

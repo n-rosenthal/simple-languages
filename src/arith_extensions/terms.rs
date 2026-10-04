@@ -1,10 +1,15 @@
+///! Termos de `arith-extensions`.
+
 use std::fmt;
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Add,
     Sub,
     Mul,
+    Div,
+    Mod,
     LessThan,
     Equal,
     And,
@@ -17,6 +22,8 @@ impl BinaryOp {
             BinaryOp::Add => "+",
             BinaryOp::Sub => "-",
             BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Mod => "%",
             BinaryOp::LessThan => "<",
             BinaryOp::Equal => "==",
             BinaryOp::And => "&&",

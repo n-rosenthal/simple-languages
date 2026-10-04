@@ -4,10 +4,13 @@
 //! `RUNNERS` e outra em `SESSIONS`.
 
 use crate::arith::Arith;
+use crate::stlc::Stlc;
+use crate::arith_extensions::ArithExtensions;
 use crate::common::driver::{Dispatch, Runner};
 use crate::common::language::Language;
 use crate::common::interpreter::{Interpreter, Session};
-use crate::stlc::Stlc;
+
+
 
 type MakeRunner = fn() -> Box<dyn Runner>;
 type MakeSession = fn() -> Box<dyn Interpreter>;
@@ -20,11 +23,12 @@ fn session_of<L: Language + 'static>() -> Box<dyn Interpreter> {
     Box::new(Session::<L>::new())
 }
 
-const RUNNERS: &[MakeRunner] = &[runner::<Arith>, runner::<Stlc>];
+const RUNNERS: &[MakeRunner] = &[runner::<Arith>, runner::<Stlc>,];
 
 const SESSIONS: &[(&str, MakeSession)] = &[
     (Arith::NAME, session_of::<Arith>),
     (Stlc::NAME, session_of::<Stlc>),
+    (ArithExtensions::NAME, session_of::<ArithExtensions>),
 ];
 
 /// Os nomes das linguagens, na ordem de registro.

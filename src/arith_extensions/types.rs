@@ -1,3 +1,5 @@
+///!    Tipos de `arith-extensions`: inteiros e booleanos.
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

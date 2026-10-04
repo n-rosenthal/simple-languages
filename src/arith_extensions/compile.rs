@@ -1,4 +1,4 @@
-//! Compilação de `arith` para a linguagem de máquina compartilhada.
+//! Compilação de `arith-extensions` para a linguagem de máquina compartilhada.
 //!
 //! Os operadores são estritos e avaliam a esquerda antes da direita, como
 //! na semântica estrutural: `a op b` vira `a; b; prim`. O `if` vira
@@ -18,6 +18,8 @@ fn prim(op: BinaryOp) -> Prim {
         BinaryOp::Add => Prim::Add,
         BinaryOp::Sub => Prim::Sub,
         BinaryOp::Mul => Prim::Mul,
+        BinaryOp::Div => Prim::Div,
+        BinaryOp::Mod => Prim::Mod,
         BinaryOp::LessThan => Prim::Lt,
         BinaryOp::Equal => Prim::Eq,
         BinaryOp::And => Prim::And,

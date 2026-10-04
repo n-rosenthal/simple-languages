@@ -1,3 +1,5 @@
+///!    Valores de `arith-extensions`: inteiros e booleanos, com operadores binários.
+
 use std::fmt;
 
 use super::terms::{BinaryOp, Term};
@@ -46,6 +48,8 @@ pub fn apply(op: BinaryOp, lhs: Value, rhs: Value) -> Option<Value> {
         (BinaryOp::Equal, Boolean(a), Boolean(b)) => Some(Boolean(a == b)),
         (BinaryOp::And, Boolean(a), Boolean(b)) => Some(Boolean(a && b)),
         (BinaryOp::Or, Boolean(a), Boolean(b)) => Some(Boolean(a || b)),
+        (BinaryOp::Div, Integer(a), Integer(b)) => Some(Integer(a.wrapping_div(b))),
+        (BinaryOp::Mod, Integer(a), Integer(b)) => Some(Integer(a.wrapping_rem(b))),
         _ => None,
     }
 }

@@ -1,4 +1,4 @@
-//! Parser de `arith`: descida recursiva com uma tabela de precedência.
+//! Parser de `arith-extensions`: descida recursiva com uma tabela de precedência.
 //!
 //! ```text
 //! term        ::= "if" term "then" term "else" term | binary(0)
@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Níveis de precedência, do mais fraco para o mais forte:
-//! `||`, `&&`, `==`, `<`, `+ -`, `*`. Um `if` como operando precisa de
+//! `||`, `&&`, `==`, `<`, `+ -`, `*`, `/`, `%`. Um `if` como operando precisa de
 //! parênteses.
 
 use crate::common::frontend::{parse_binary, parse_complete, parse_integer};
@@ -27,6 +27,7 @@ const LEVELS: &[&[(ArithTokenType, BinaryOp)]] = &[
     &[(T::Equal, BinaryOp::Equal)],
     &[(T::LessThan, BinaryOp::LessThan)],
     &[(T::Plus, BinaryOp::Add), (T::Minus, BinaryOp::Sub)],
+    &[(T::Slash, BinaryOp::Div), (T::Percent, BinaryOp::Mod)],
     &[(T::Star, BinaryOp::Mul)],
 ];
 
@@ -100,7 +101,7 @@ impl Parser for ArithParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arith::{ArithLexer, ArithScanner};
+    use crate::arith_extensions::{ArithLexer, ArithScanner};
     use crate::common::{Lexer, Scanner};
 
     fn parse(source: &str) -> Result<Term, ParseError> {

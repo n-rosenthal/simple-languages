@@ -1,4 +1,4 @@
-//! `arith` como instância de [`Language`].
+//! `arith-extensions` como instância de [`Language`].
 
 use crate::common::frontend::{parse_source, FrontendError};
 use crate::common::language::{Example, Language, Syntax};
@@ -19,7 +19,7 @@ use super::ArithScanner;
 pub type SyntaxError = FrontendError<ScanError, LexError, ParseError>;
 
 /// Expressões aritméticas e booleanas (TAPL, caps. 3 e 8).
-pub struct Arith;
+pub struct ArithExtensions;
 
 const EXAMPLES: &[Example] = &[
     Example { title: "Soma e produto", source: "(2 * 3) + (4 - 5)" },
@@ -53,11 +53,11 @@ const SYNTAX: &[Syntax] = &[
     Syntax { title: "tipos", meta: "T", productions: &[r"\mathsf{Integer}", r"\mathsf{Boolean}"] },
 ];
 
-impl Language for Arith {
+impl Language for ArithExtensions {
     const NAME: &'static str = "arith-extensions";
     const DESCRIPTION: &'static str =
         "integers, booleans, + - * < == && ||, if/then/else (TAPL chs. 3 and 8)";
-
+    
     type Term = Term;
     type Type = Type;
     type Value = Value;

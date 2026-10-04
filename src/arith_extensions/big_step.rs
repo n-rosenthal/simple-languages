@@ -1,4 +1,4 @@
-//! Semântica natural de `arith`: `t ⇓ v`.
+//! Semântica natural de `arith-extensions`: `t ⇓ v`.
 //!
 //! Aqui "nenhuma regra se aplica" é um erro (não há derivação), ao
 //! contrário da semântica estrutural, onde o termo simplesmente trava.
@@ -22,6 +22,12 @@ crate::rules! {
         },
         Mul => "E-Mul" {
             [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 \times t_2 \Downarrow n_1 \times n_2"
+        },
+        Div => "E-Div" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 / t_2 \Downarrow n_1 / n_2"
+        },
+        Mod => "E-Mod" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 \% t_2 \Downarrow n_1 \% n_2"
         },
         LessThan => "E-Lt" {
             [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 < t_2 \Downarrow (n_1 < n_2)"
@@ -75,6 +81,8 @@ fn rule_of(op: BinaryOp) -> EvalRule {
         BinaryOp::Add => EvalRule::Add,
         BinaryOp::Sub => EvalRule::Sub,
         BinaryOp::Mul => EvalRule::Mul,
+        BinaryOp::Div => EvalRule::Div,
+        BinaryOp::Mod => EvalRule::Mod,
         BinaryOp::LessThan => EvalRule::LessThan,
         BinaryOp::Equal => EvalRule::Equal,
         BinaryOp::And => EvalRule::And,

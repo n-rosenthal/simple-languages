@@ -1,7 +1,7 @@
-//! Lexer de `arith`: uma tabela para o lexer genérico.
+//! Lexer de `arith-extensions`: uma tabela para o lexer genérico.
 //!
 //! Tokens: inteiros, `true`/`false`, `if`/`then`/`else`, `+ - * <`, `==`,
-//! `&&`, `||` e parênteses. Qualquer outra palavra é um erro: `arith` não tem
+//! `&&`, `||`, `/`, `%` e parênteses. Qualquer outra palavra é um erro: `arith-extensions` não tem
 //! variáveis.
 
 use crate::common::frontend::{lex, LexSpec, Words};
@@ -25,6 +25,8 @@ const SPEC: LexSpec<ArithTokenType> = LexSpec {
         ("+", T::Plus),
         ("-", T::Minus),
         ("*", T::Star),
+        ("/", T::Slash),
+        ("%", T::Percent),
         ("<", T::LessThan),
         ("==", T::Equal),
         ("&&", T::And),

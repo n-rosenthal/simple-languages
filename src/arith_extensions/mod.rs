@@ -18,7 +18,7 @@ pub use crate::common::source::{LineScanner as ArithScanner, ScanError};
 
 pub use big_step::{ArithBigStep, EvalError, EvalRule};
 pub use compile::ArithCompiler;
-pub use language::{Arith, SyntaxError};
+pub use language::{ArithExtensions, SyntaxError};
 pub use lexer::ArithLexer;
 pub use parser::ArithParser;
 pub use small_step::{ArithSmallStep, SmallStepRule};
@@ -60,8 +60,8 @@ mod laws {
     #[test]
     fn every_law_holds_on_every_sample() {
         for source in SAMPLES {
-            let term = Arith::parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
-            let violated = law_violations::<Arith>(&term);
+            let term = ArithExtensions::parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+            let violated = law_violations::<ArithExtensions>(&term);
             assert!(violated.is_empty(), "{source}: {violated:?}");
         }
     }
@@ -71,7 +71,7 @@ mod laws {
         use crate::common::semantics::{run, Typing};
 
         for source in SAMPLES {
-            let term = Arith::parse(source).unwrap();
+            let term = ArithExtensions::parse(source).unwrap();
             if ArithTyping::is_well_typed(&term) {
                 assert!(!run::<ArithSmallStep>(term).is_stuck(), "{source}");
             }
@@ -80,8 +80,8 @@ mod laws {
 
     #[test]
     fn the_examples_all_parse() {
-        for example in Arith::examples() {
-            assert!(Arith::parse(example.source).is_ok(), "{}", example.title);
+        for example in ArithExtensions::examples() {
+            assert!(ArithExtensions::parse(example.source).is_ok(), "{}", example.title);
         }
     }
 }

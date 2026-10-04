@@ -1,3 +1,5 @@
+///! Implementações de `ToLatex` para `arith-extensions`.
+
 use crate::common::ToLatex;
 
 use super::terms::{BinaryOp, Term};
@@ -30,6 +32,8 @@ impl ToLatex for BinaryOp {
             BinaryOp::Equal => "=".to_string(),
             BinaryOp::And => r"\wedge".to_string(),
             BinaryOp::Or => r"\vee".to_string(),
+            BinaryOp::Div => "/".to_string(),
+            BinaryOp::Mod => r"\bmod".to_string(),
         }
     }
 }

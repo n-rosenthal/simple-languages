@@ -1,5 +1,5 @@
-   0.023888748s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
-   0.023927039s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-e207babec483f6f3/bin-simple-languages`
+   0.024825973s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: false }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
+   0.024860023s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-e207babec483f6f3/bin-simple-languages`
 
 Caused by:
     No such file or directory (os error 2)
@@ -43,8 +43,8 @@ Stack backtrace:
   25: __libc_start_main_impl
              at ./csu/../csu/libc-start.c:392:3
   26: <unknown>
-   0.189321688s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
-   0.189350190s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-6c1fccb8b25ca571/test-bin-simple-languages`
+   0.189820728s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint: fingerprint error for simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)/Check { test: true }/TargetInner { name: "simple-languages", doc: true, ..: with_path("/home/nrdc/org/roam/projects/programming/simple-languages/src/main.rs", Edition2021) }
+   0.189849726s  INFO prepare_target{force=false package_id=simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages) target="simple-languages"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/nrdc/org/roam/projects/programming/simple-languages/target/debug/.fingerprint/simple-languages-6c1fccb8b25ca571/test-bin-simple-languages`
 
 Caused by:
     No such file or directory (os error 2)
@@ -89,6 +89,6 @@ Stack backtrace:
              at ./csu/../csu/libc-start.c:392:3
   26: <unknown>
     Checking simple-languages v1.2.1 (/home/nrdc/org/roam/projects/programming/simple-languages)
-error: could not compile `simple-languages` (bin "simple-languages" test) due to 10 previous errors; 3 warnings emitted
-warning: build failed, waiting for other jobs to finish...
 error: could not compile `simple-languages` (bin "simple-languages") due to 10 previous errors; 3 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `simple-languages` (bin "simple-languages" test) due to 10 previous errors; 3 warnings emitted
