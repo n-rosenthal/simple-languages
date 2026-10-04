@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::common::language::{Example, Language};
+use crate::common::language::{Example, Language, Syntax};
 use crate::common::source::ScanError;
 use crate::common::{Lexer, Parser, Scanner};
 
@@ -68,6 +68,28 @@ const EXAMPLES: &[Example] = &[
     Example { title: "Condição que não é booleana", source: "if 1 then 2 else 3" },
 ];
 
+const SYNTAX: &[Syntax] = &[
+    Syntax {
+        title: "termos",
+        meta: "t",
+        productions: &[
+            r"n",
+            r"\mathsf{true}",
+            r"\mathsf{false}",
+            r"t_1 + t_2",
+            r"t_1 - t_2",
+            r"t_1 \times t_2",
+            r"t_1 < t_2",
+            r"t_1 = t_2",
+            r"t_1 \wedge t_2",
+            r"t_1 \vee t_2",
+            r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3",
+        ],
+    },
+    Syntax { title: "valores", meta: "v", productions: &[r"n", r"\mathsf{true}", r"\mathsf{false}"] },
+    Syntax { title: "tipos", meta: "T", productions: &[r"\mathsf{Integer}", r"\mathsf{Boolean}"] },
+];
+
 impl Language for Arith {
     const NAME: &'static str = "arith";
     const DESCRIPTION: &'static str =
@@ -92,5 +114,9 @@ impl Language for Arith {
 
     fn examples() -> &'static [Example] {
         EXAMPLES
+    }
+
+    fn syntax() -> &'static [Syntax] {
+        SYNTAX
     }
 }

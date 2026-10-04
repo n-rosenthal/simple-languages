@@ -11,17 +11,26 @@ use super::types::Type;
 crate::rules! {
     pub enum TypingRule {
         /// Γ ⊢ true : Bool
-        True => "T-True",
+        True => "T-True" { [] => r"\Gamma \vdash \mathsf{true} : \mathsf{Bool}" },
         /// Γ ⊢ false : Bool
-        False => "T-False",
+        False => "T-False" { [] => r"\Gamma \vdash \mathsf{false} : \mathsf{Bool}" },
         /// Γ ⊢ t1 : Bool,  Γ ⊢ t2 : T,  Γ ⊢ t3 : T  ⟹  Γ ⊢ if t1 then t2 else t3 : T
-        If => "T-If",
+        If => "T-If" {
+            [r"\Gamma \vdash t_1 : \mathsf{Bool}", r"\Gamma \vdash t_2 : T", r"\Gamma \vdash t_3 : T"]
+                => r"\Gamma \vdash \mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 : T"
+        },
         /// x:T ∈ Γ  ⟹  Γ ⊢ x : T
-        Var => "T-Var",
+        Var => "T-Var" { [r"x{:}T \in \Gamma"] => r"\Gamma \vdash x : T" },
         /// Γ, x:T1 ⊢ t : T2  ⟹  Γ ⊢ λx:T1. t : T1 → T2
-        Abs => "T-Abs",
+        Abs => "T-Abs" {
+            [r"\Gamma,\, x{:}T_1 \vdash t_2 : T_2"]
+                => r"\Gamma \vdash \lambda x{:}T_1.\, t_2 : T_1 \to T_2"
+        },
         /// Γ ⊢ t1 : T1 → T2,  Γ ⊢ t2 : T1  ⟹  Γ ⊢ t1 t2 : T2
-        App => "T-App",
+        App => "T-App" {
+            [r"\Gamma \vdash t_1 : T_{11} \to T_{12}", r"\Gamma \vdash t_2 : T_{11}"]
+                => r"\Gamma \vdash t_1\ t_2 : T_{12}"
+        },
     }
 }
 

@@ -12,17 +12,37 @@ use super::values::{apply, Value};
 
 crate::rules! {
     pub enum EvalRule {
-        Integer => "E-Int",
-        Boolean => "E-Bool",
-        Add => "E-Add",
-        Sub => "E-Sub",
-        Mul => "E-Mul",
-        LessThan => "E-Lt",
-        Equal => "E-Eq",
-        And => "E-And",
-        Or => "E-Or",
-        IfTrue => "E-IfTrue",
-        IfFalse => "E-IfFalse",
+        Integer => "E-Int" { [] => r"n \Downarrow n" },
+        Boolean => "E-Bool" { [] => r"b \Downarrow b" },
+        Add => "E-Add" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 + t_2 \Downarrow n_1 + n_2"
+        },
+        Sub => "E-Sub" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 - t_2 \Downarrow n_1 - n_2"
+        },
+        Mul => "E-Mul" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 \times t_2 \Downarrow n_1 \times n_2"
+        },
+        LessThan => "E-Lt" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 < t_2 \Downarrow (n_1 < n_2)"
+        },
+        Equal => "E-Eq" {
+            [r"t_1 \Downarrow v_1", r"t_2 \Downarrow v_2"] => r"t_1 = t_2 \Downarrow (v_1 = v_2)"
+        },
+        And => "E-And" {
+            [r"t_1 \Downarrow b_1", r"t_2 \Downarrow b_2"] => r"t_1 \wedge t_2 \Downarrow b_1 \wedge b_2"
+        },
+        Or => "E-Or" {
+            [r"t_1 \Downarrow b_1", r"t_2 \Downarrow b_2"] => r"t_1 \vee t_2 \Downarrow b_1 \vee b_2"
+        },
+        IfTrue => "E-IfTrue" {
+            [r"t_1 \Downarrow \mathsf{true}", r"t_2 \Downarrow v"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \Downarrow v"
+        },
+        IfFalse => "E-IfFalse" {
+            [r"t_1 \Downarrow \mathsf{false}", r"t_3 \Downarrow v"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \Downarrow v"
+        },
     }
 }
 

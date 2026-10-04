@@ -21,8 +21,9 @@
 use std::fmt::Write as _;
 use std::str::FromStr;
 
-use crate::common::driver::{execute_term, Command, Options};
-use crate::common::language::{Example, Language};
+use crate::common::document::{blocks_to_text, Block};
+use crate::common::driver::{execute_blocks, Command, Options};
+use crate::common::language::{rule_blocks, syntax_blocks, Example, Language};
 
 /// Tamanho máximo de uma linha, em caracteres.
 pub const MAX_INPUT_CHARS: usize = 2_000;
@@ -58,18 +59,22 @@ impl ReplyKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub kind: ReplyKind,
+    /// A resposta como texto (o que o terminal imprime).
     pub text: String,
+    /// A mesma resposta como blocos (títulos, texto, fórmulas); vazio nas
+    /// respostas que são só uma mensagem. A página web renderiza os blocos.
+    pub blocks: Vec<Block>,
     /// O usuário pediu para sair (`:quit`).
     pub quit: bool,
 }
 
 impl Reply {
     fn new(kind: ReplyKind, text: impl Into<String>) -> Self {
-        Self { kind, text: text.into(), quit: false }
+        Self { kind, text: text.into(), blocks: Vec::new(), quit: false }
     }
 
-    fn output(text: impl Into<String>) -> Self {
-        Self::new(ReplyKind::Output, text)
+    fn with_blocks(kind: ReplyKind, blocks: Vec<Block>) -> Self {
+        Self { kind, text: blocks_to_text(&blocks), blocks, quit: false }
     }
 
     fn error(text: impl Into<String>) -> Self {
@@ -102,6 +107,12 @@ pub trait Interpreter {
 
     /// As definições, como pares `(nome, termo)`.
     fn definitions(&self) -> Vec<(String, String)>;
+
+    /// A gramática da linguagem, como blocos (vazio se não declarada).
+    fn syntax(&self) -> Vec<Block>;
+
+    /// As regras de tipagem, das duas semânticas e da máquina, como blocos.
+    fn rules(&self) -> Vec<Block>;
 
     fn submit(&mut self, line: &str) -> Reply;
 }
@@ -144,8 +155,8 @@ impl<L: Language> Session<L> {
             Err(reply) => return reply,
         };
 
-        match execute_term::<L>(self.mode, &term, &self.options) {
-            Ok(text) => Reply::output(text),
+        match execute_blocks::<L>(self.mode, &term, &self.options) {
+            Ok(blocks) => Reply::with_blocks(ReplyKind::Output, blocks),
             Err(text) => Reply::error(text),
         }
     }
@@ -230,6 +241,14 @@ impl<L: Language> Session<L> {
         }
     }
 
+    fn show_syntax(&self) -> Reply {
+        let blocks = syntax_blocks::<L>();
+        if blocks.is_empty() {
+            return Reply::info(format!("{} does not list its syntax", L::NAME));
+        }
+        Reply::with_blocks(ReplyKind::Info, blocks)
+    }
+
     fn list_definitions(&self) -> Reply {
         if self.definitions.is_empty() {
             return Reply::info("no definitions");
@@ -256,6 +275,7 @@ impl<L: Language> Session<L> {
             let _ = writeln!(out, "  :defs  :reset        list / clear definitions");
         }
         let _ = writeln!(out, "  :examples            list examples; `:example N` runs one");
+        let _ = writeln!(out, "  :syntax  :rules      the grammar / the inference rules (LaTeX in the terminal)");
         let _ = writeln!(out, "  :help  :quit");
         out
     }
@@ -280,6 +300,9 @@ impl<L: Language> Session<L> {
                 self.definitions.clear();
                 Reply::info("definitions cleared")
             }
+
+            ("syntax", _) => self.show_syntax(),
+            ("rules", _) => Reply::with_blocks(ReplyKind::Info, rule_blocks::<L>()),
 
             ("examples", _) => self.list_examples(),
             ("example" | "load", Some(n)) => self.run_example(n),
@@ -376,6 +399,14 @@ impl<L: Language> Interpreter for Session<L> {
             .iter()
             .map(|(name, term)| (name.clone(), term.to_string()))
             .collect()
+    }
+
+    fn syntax(&self) -> Vec<Block> {
+        syntax_blocks::<L>()
+    }
+
+    fn rules(&self) -> Vec<Block> {
+        rule_blocks::<L>()
     }
 
     fn submit(&mut self, line: &str) -> Reply {

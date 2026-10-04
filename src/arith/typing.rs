@@ -9,16 +9,39 @@ use super::types::Type;
 
 crate::rules! {
     pub enum TypingRule {
-        Integer => "T-Int",
-        Boolean => "T-Bool",
-        Add => "T-Add",
-        Sub => "T-Sub",
-        Mul => "T-Mul",
-        LessThan => "T-Lt",
-        Equal => "T-Eq",
-        And => "T-And",
-        Or => "T-Or",
-        If => "T-If",
+        Integer => "T-Int" { [] => r"\vdash n : \mathsf{Integer}" },
+        Boolean => "T-Bool" { [] => r"\vdash b : \mathsf{Boolean}" },
+        Add => "T-Add" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 + t_2 : \mathsf{Integer}"
+        },
+        Sub => "T-Sub" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 - t_2 : \mathsf{Integer}"
+        },
+        Mul => "T-Mul" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 \times t_2 : \mathsf{Integer}"
+        },
+        LessThan => "T-Lt" {
+            [r"\vdash t_1 : \mathsf{Integer}", r"\vdash t_2 : \mathsf{Integer}"]
+                => r"\vdash t_1 < t_2 : \mathsf{Boolean}"
+        },
+        Equal => "T-Eq" {
+            [r"\vdash t_1 : T", r"\vdash t_2 : T"] => r"\vdash t_1 = t_2 : \mathsf{Boolean}"
+        },
+        And => "T-And" {
+            [r"\vdash t_1 : \mathsf{Boolean}", r"\vdash t_2 : \mathsf{Boolean}"]
+                => r"\vdash t_1 \wedge t_2 : \mathsf{Boolean}"
+        },
+        Or => "T-Or" {
+            [r"\vdash t_1 : \mathsf{Boolean}", r"\vdash t_2 : \mathsf{Boolean}"]
+                => r"\vdash t_1 \vee t_2 : \mathsf{Boolean}"
+        },
+        If => "T-If" {
+            [r"\vdash t_1 : \mathsf{Boolean}", r"\vdash t_2 : T", r"\vdash t_3 : T"]
+                => r"\vdash \mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 : T"
+        },
     }
 }
 

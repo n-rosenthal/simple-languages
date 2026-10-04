@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::common::language::{Example, Language};
+use crate::common::language::{Example, Language, Syntax};
 use crate::common::{Lexer, Parser, Scanner};
 
 use super::big_step::StlcBigStep;
@@ -79,6 +79,32 @@ const EXAMPLES: &[Example] = &[
     Example { title: "ω: diverge", source: "(λx:A. x x) (λx:A. x x)" },
 ];
 
+const SYNTAX: &[Syntax] = &[
+    Syntax {
+        title: "termos",
+        meta: "t",
+        productions: &[
+            r"x",
+            r"\mathsf{true}",
+            r"\mathsf{false}",
+            r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3",
+            r"\lambda x{:}T.\, t",
+            r"t_1\ t_2",
+        ],
+    },
+    Syntax {
+        title: "valores",
+        meta: "v",
+        productions: &[r"\mathsf{true}", r"\mathsf{false}", r"\lambda x{:}T.\, t"],
+    },
+    Syntax {
+        title: "tipos",
+        meta: "T",
+        productions: &[r"\mathsf{Bool}", r"A", r"T_1 \to T_2"],
+    },
+    Syntax { title: "contextos", meta: r"\Gamma", productions: &[r"\emptyset", r"\Gamma,\, x{:}T"] },
+];
+
 impl Language for Stlc {
     const NAME: &'static str = "stlc";
     const DESCRIPTION: &'static str =
@@ -104,6 +130,10 @@ impl Language for Stlc {
 
     fn examples() -> &'static [Example] {
         EXAMPLES
+    }
+
+    fn syntax() -> &'static [Syntax] {
+        SYNTAX
     }
 
     fn substitute(term: &Term, name: &str, value: &Term) -> Term {

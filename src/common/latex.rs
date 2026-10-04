@@ -55,6 +55,30 @@ pub fn inference(premises: &[String], conclusion: &str, label: &str) -> String {
     )
 }
 
+// -----------------------------------------------------------------------------
+// Sabor "web" (KaTeX)
+// -----------------------------------------------------------------------------
+//
+// O KaTeX não tem `mathpartir` (`\inferrule*`) nem `\textsc`. Para o navegador,
+// uma regra é um `\dfrac` (as derivações aninham por recursão) e o nome da
+// regra vai à direita da barra, em `\text`.
+
+/// O nome de uma regra, à direita da barra de inferência.
+pub fn web_label(name: &str) -> String {
+    format!(r"\text{{\small {name}}}")
+}
+
+/// Uma regra de inferência para o KaTeX: `premissas / conclusão`, com o rótulo
+/// à direita. As premissas ficam lado a lado; sem premissas é um axioma.
+pub fn web_inference(premises: &[String], conclusion: &str, label: &str) -> String {
+    let numerator = if premises.is_empty() {
+        r"\vphantom{X}".to_string()
+    } else {
+        premises.join(r" \qquad ")
+    };
+    format!(r"\dfrac{{{numerator}}}{{{conclusion}}}\ {label}")
+}
+
 /// Documento mínimo compilável com `pdflatex`, útil para conferir a saída.
 pub fn standalone_document(body: &str) -> String {
     format!(

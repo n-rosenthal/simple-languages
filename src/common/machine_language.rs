@@ -360,18 +360,39 @@ impl fmt::Display for Config {
 }
 
 crate::rules! {
-    /// Regras da máquina. Chamadas e retornos são regras próprias.
+    /// Regras da máquina. Chamadas e retornos são regras próprias. Um estado
+    /// é `⟨código, pilha, ambiente, quadros⟩`; `k` é o resto do código.
     pub enum MachineRule {
-        Const   => "M-Const",
-        Prim    => "M-Prim",
-        Access  => "M-Access",
-        Closure => "M-Closure",
-        Apply   => "M-Apply",
-        Return  => "M-Return",
-        Branch  => "M-Branch",
-        Ref     => "M-Ref",
-        Deref   => "M-Deref",
-        Assign  => "M-Assign",
+        Const => "M-Const" {
+            [] => r"\langle \mathsf{const}\ c :: k,\ s,\ e,\ f \rangle \to \langle k,\ c :: s,\ e,\ f \rangle"
+        },
+        Prim => "M-Prim" {
+            [] => r"\langle \mathsf{prim}\ \oplus :: k,\ v_2 :: v_1 :: s,\ e,\ f \rangle \to \langle k,\ (v_1 \oplus v_2) :: s,\ e,\ f \rangle"
+        },
+        Access => "M-Access" {
+            [] => r"\langle \mathsf{access}\ n :: k,\ s,\ e,\ f \rangle \to \langle k,\ e(n) :: s,\ e,\ f \rangle"
+        },
+        Closure => "M-Closure" {
+            [] => r"\langle \mathsf{closure}\ c' :: k,\ s,\ e,\ f \rangle \to \langle k,\ \langle c', e \rangle :: s,\ e,\ f \rangle"
+        },
+        Apply => "M-Apply" {
+            [] => r"\langle \mathsf{apply} :: k,\ v :: \langle c', e' \rangle :: s,\ e,\ f \rangle \to \langle c',\ s,\ v :: e',\ (k, e) :: f \rangle"
+        },
+        Return => "M-Return" {
+            [] => r"\langle [\,],\ s,\ e,\ (k, e') :: f \rangle \to \langle k,\ s,\ e',\ f \rangle"
+        },
+        Branch => "M-Branch" {
+            [] => r"\langle \mathsf{branch}(c_1, c_2) :: k,\ \mathsf{true} :: s,\ e,\ f \rangle \to \langle c_1,\ s,\ e,\ (k, e) :: f \rangle"
+        },
+        Ref => "M-Ref" {
+            [] => r"\langle \mathsf{ref} :: k,\ v :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ l :: s,\ e,\ f,\ \mu[l \mapsto v] \rangle"
+        },
+        Deref => "M-Deref" {
+            [] => r"\langle \mathsf{deref} :: k,\ l :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ \mu(l) :: s,\ e,\ f,\ \mu \rangle"
+        },
+        Assign => "M-Assign" {
+            [] => r"\langle \mathsf{assign} :: k,\ v :: l :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ \mathsf{unit} :: s,\ e,\ f,\ \mu[l \mapsto v] \rangle"
+        },
     }
 }
 

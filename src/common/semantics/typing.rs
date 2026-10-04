@@ -67,7 +67,9 @@ impl ToLatex for Untyped {
 }
 
 crate::rules! {
-    pub enum NoTypingRule { Any => "T-Any" }
+    pub enum NoTypingRule {
+        Any => "T-Any" { [] => r"\vdash t : \mathsf{Untyped}" },
+    }
 }
 
 /// `Typing` para linguagens sem sistema de tipos: todo termo é bem tipado,

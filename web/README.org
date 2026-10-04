@@ -26,6 +26,40 @@ python3 -m http.server 8080 -d web/www
 A página precisa ser servida por HTTP: o navegador não carrega módulos ES nem
 =.wasm= de =file://=.
 
+* Renderização em LaTeX
+
+Cada resposta do interpretador é uma lista de blocos (=Block= em
+=src/common/document.rs=): títulos, texto, erros e fórmulas. Uma fórmula tem
+três visões:
+
+| visão   | para quê                                                  |
+|---------+-----------------------------------------------------------|
+| =web=   | LaTeX para o KaTeX (renderizado na página)                |
+| =tex=   | LaTeX para =pdflatex= (=mathpartir=), botão "copiar LaTeX" |
+| =text=  | o texto do terminal (botão "texto")                       |
+
+O KaTeX não tem =\inferrule*= nem =\textsc=, então a versão =web= desenha cada
+regra como =\dfrac= (as árvores de derivação aninham por recursão) e o nome da
+regra vai à direita da barra, em =\text=. O que é renderizado:
+
+- *termos e tipos*: o =ToLatex= de cada linguagem;
+- *derivações* (tipagem e big-step): árvores de prova;
+- *traces* da semântica estrutural: cadeias =t → t'= com a regra sobre a seta;
+- *sintaxe* e *regras de inferência* de cada linguagem, no painel "Referência"
+  (premissas e conclusão de cada regra vêm de =rules!=, em =Schema=).
+
+O KaTeX está em =www/vendor/katex= (MIT, só fontes =woff2=), então a página
+funciona sem CDN.
+
+** Conferir o LaTeX
+
+Despeja todo o LaTeX web de todos os exemplos, modos, sintaxes e regras e passa
+tudo pelo KaTeX em modo estrito:
+
+#+begin_src sh
+cargo run -q --example dump_latex | node web/tools/check-latex.mjs
+#+end_src
+
 * Estrutura
 
 | arquivo             | função                                                         |
@@ -35,6 +69,8 @@ A página precisa ser servida por HTTP: o navegador não carrega módulos ES nem
 | =www/index.html=    | a página                                                       |
 | =www/main.js=       | liga a interface a =Playground.submit=                         |
 | =www/style.css=     | tema claro/escuro                                              |
+| =www/vendor/katex/= | KaTeX 0.19 (js, css, fontes woff2)                             |
+| =tools/check-latex.mjs= | confere o LaTeX gerado contra o KaTeX                        |
 | =www/pkg/=          | saída do =wasm-pack= (não versionada)                          |
 
 * Testes
@@ -56,10 +92,19 @@ O interpretador roda no navegador, então há limites (em
 =simple_languages::common::interpreter=): linha de até 2 000 caracteres, 100
 níveis de parênteses e no máximo 20 000 passos (=:fuel=). Termos divergentes
 (como \omega) terminam por falta de passos, e a profundidade de big-step de
-=lambda= é limitada a 200.
+=stlc= é limitada a 200.
 
 * Acrescentar uma linguagem
 
 Implemente =Language= no crate principal e registre em =src/registry.rs=
 (=RUNNERS= e =SESSIONS=). A página a lista sozinha: seletor de linguagem,
-exemplos e definições vêm de =Language::examples= e =SUPPORTS_DEFINITIONS=.
+exemplos e definições vêm de =Language::examples= e =SUPPORTS_DEFINITIONS=; a
+sintaxe vem de =Language::syntax= e as regras, do esquema declarado em =rules!=:
+
+#+begin_src rust
+rules! {
+    pub enum TypingRule {
+        Var => "T-Var" { [r"x{:}T \in \Gamma"] => r"\Gamma \vdash x : T" },
+    }
+}
+#+end_src

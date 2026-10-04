@@ -198,20 +198,30 @@ where
 {
     /// Uma cadeia `t0 →[r1] t1 →[r2] t2`, alinhada (requer `amsmath`).
     pub fn to_latex(&self) -> String {
-        if self.steps.is_empty() {
+        self.to_latex_limited(usize::MAX)
+    }
+
+    /// Como [`Trace::to_latex`], mostrando no máximo `max_steps` passos.
+    pub fn to_latex_limited(&self, max_steps: usize) -> String {
+        self.chain(max_steps, |rule| rule.to_latex())
+    }
+
+    /// A mesma cadeia para o KaTeX (que não tem `\textsc`).
+    pub fn to_katex_limited(&self, max_steps: usize) -> String {
+        self.chain(max_steps, |rule| rule.to_katex())
+    }
+
+    fn chain(&self, max_steps: usize, label: impl Fn(&S::Rule) -> String) -> String {
+        if self.steps.is_empty() && self.outcome == Outcome::Final {
             return self.start.to_latex();
         }
 
-        let rows: Vec<String> = self
-            .steps
+        let shown = self.steps.len().min(max_steps);
+        let mut rows: Vec<String> = self.steps[..shown]
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                let arrow = format!(
-                    r"&\xrightarrow{{{}}} {}",
-                    t.rule.to_latex(),
-                    t.to.to_latex()
-                );
+                let arrow = format!(r"&\xrightarrow{{{}}} {}", label(&t.rule), t.to.to_latex());
                 if i == 0 {
                     format!("{} {}", self.start.to_latex(), arrow)
                 } else {
@@ -219,6 +229,16 @@ where
                 }
             })
             .collect();
+
+        if shown == 0 {
+            rows.push(self.start.to_latex());
+        }
+        if self.steps.len() > shown {
+            rows.push(format!(r"&\ \cdots\ {}", self.final_state.to_latex()));
+        }
+        if self.outcome != Outcome::Final {
+            rows.push(format!(r"&\ \text{{\small ({})}}", self.outcome));
+        }
 
         format!("\\begin{{aligned}}{}\\end{{aligned}}", rows.join(" \\\\\n"))
     }

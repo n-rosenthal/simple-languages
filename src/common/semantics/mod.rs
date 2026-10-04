@@ -15,6 +15,6 @@ pub(crate) mod toy;
 pub use big_step::{BigStep, EvalDerivation};
 pub use derivation::{Derivation, Eval, Reduces, Typed};
 pub use machine::{Execution, Machine};
-pub use rule::Rule;
+pub use rule::{Rule, Schema};
 pub use step::{run, run_with_fuel, steps, Outcome, Step, Trace, Transition, DEFAULT_FUEL};
 pub use typing::{NoTyping, NoTypingRule, Typing, TypingDerivation, Untyped};

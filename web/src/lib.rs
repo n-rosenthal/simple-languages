@@ -7,6 +7,7 @@
 
 use std::str::FromStr;
 
+use simple_languages::common::document::Block;
 use simple_languages::common::driver::Command;
 use simple_languages::common::interpreter::{Interpreter, Reply as CoreReply};
 use simple_languages::common::language::Example;
@@ -36,6 +37,7 @@ pub fn modes() -> Vec<String> {
 pub struct Reply {
     kind: String,
     text: String,
+    blocks: Vec<String>,
     quit: bool,
 }
 
@@ -52,6 +54,15 @@ impl Reply {
         self.text.clone()
     }
 
+    /// A resposta em blocos, achatada: `[tipo, texto, web, tex, ...]`, quatro
+    /// strings por bloco. O tipo é `"heading"`, `"text"`, `"error"` ou `"math"`;
+    /// `web` é o LaTeX para o KaTeX e `tex`, o para `pdflatex` (só em `"math"`).
+    /// Vazio nas respostas que são só uma mensagem: use então `text`.
+    #[wasm_bindgen(getter)]
+    pub fn blocks(&self) -> Vec<String> {
+        self.blocks.clone()
+    }
+
     /// O usuário digitou `:quit`.
     #[wasm_bindgen(getter)]
     pub fn quit(&self) -> bool {
@@ -64,6 +75,7 @@ impl From<CoreReply> for Reply {
         Reply {
             kind: reply.kind.name().to_string(),
             text: reply.text,
+            blocks: flatten_blocks(&reply.blocks),
             quit: reply.quit,
         }
     }
@@ -137,10 +149,29 @@ impl Playground {
         flatten_examples(self.inner.examples())
     }
 
+    /// A gramática, em blocos achatados (ver `Reply.blocks`).
+    pub fn syntax(&self) -> Vec<String> {
+        flatten_blocks(&self.inner.syntax())
+    }
+
+    /// As regras (tipagem, semânticas, máquina), em blocos achatados.
+    pub fn rules(&self) -> Vec<String> {
+        flatten_blocks(&self.inner.rules())
+    }
+
     /// As definições, achatadas: `[nome, termo, nome, termo, ...]`.
     pub fn definitions(&self) -> Vec<String> {
         flatten_pairs(self.inner.definitions())
     }
+}
+
+fn flatten_blocks(blocks: &[Block]) -> Vec<String> {
+    blocks
+        .iter()
+        .flat_map(|b| {
+            [b.kind().to_string(), b.text().to_string(), b.web().to_string(), b.tex().to_string()]
+        })
+        .collect()
 }
 
 fn flatten_examples(examples: &[Example]) -> Vec<String> {
@@ -160,22 +191,22 @@ mod tests {
 
     #[test]
     fn lists_the_registered_languages_and_modes() {
-        assert_eq!(languages(), vec!["arith", "lambda"]);
+        assert_eq!(languages(), vec!["arith", "stlc"]);
         assert_eq!(modes().first().map(String::as_str), Some("parse"));
         assert!(modes().contains(&"machine".to_string()));
     }
 
     #[test]
     fn opens_known_languages_only() {
-        assert!(Playground::open("lambda").is_some());
+        assert!(Playground::open("stlc").is_some());
         assert!(Playground::open("nope").is_none());
     }
 
     #[test]
     fn a_session_round_trip() {
-        let mut pg = Playground::open("lambda").unwrap();
+        let mut pg = Playground::open("stlc").unwrap();
 
-        assert_eq!(pg.language(), "lambda");
+        assert_eq!(pg.language(), "stlc");
         assert!(pg.supports_definitions());
         assert_eq!(pg.mode(), "full");
 
@@ -205,7 +236,7 @@ mod tests {
 
     #[test]
     fn examples_and_definitions_are_flattened() {
-        let mut pg = Playground::open("lambda").unwrap();
+        let mut pg = Playground::open("stlc").unwrap();
 
         let examples = pg.examples();
         assert!(!examples.is_empty() && examples.len() % 2 == 0);

@@ -22,7 +22,14 @@ const el = {
   share: $("share"),
   clear: $("clear"),
   insertLambda: $("insert-lambda"),
+  referencePanel: $("reference-panel"),
+  reference: $("reference"),
+  tabs: [...document.querySelectorAll("#reference-panel .tabs button")],
 };
+
+// O KaTeX vem de vendor/katex (carregado antes deste módulo). Se faltar, as
+// fórmulas aparecem como o LaTeX em texto.
+const katex = window.katex;
 
 let playground = null;
 let lastTerm = "";
@@ -108,7 +115,92 @@ function addOutput(parent, kind, text) {
   parent.append(pre);
 }
 
-function addEntry(input, kind, text) {
+/** Uma fórmula em `target`; sem KaTeX, ou se ele recusar, mostra o LaTeX. */
+function renderTex(target, latex, { display = true } = {}) {
+  if (!katex) {
+    target.textContent = latex;
+    return false;
+  }
+  try {
+    katex.render(latex, target, {
+      displayMode: display,
+      throwOnError: true,
+      strict: "ignore",
+      trust: false,
+      maxExpand: 5000,
+    });
+    return true;
+  } catch (error) {
+    target.textContent = latex;
+    target.classList.add("tex-failed");
+    target.title = String(error.message ?? error);
+    return false;
+  }
+}
+
+function node(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+/**
+ * Uma fórmula com três visões: renderizada (KaTeX), o texto do terminal e o
+ * LaTeX para `pdflatex`. Os botões alternam as visões e copiam o LaTeX.
+ */
+function mathBlock(text, web, tex) {
+  const box = node("div", "block math");
+  const bar = node("div", "bar");
+  const rendered = node("div", "rendered");
+  const alt = node("pre", "alt");
+  alt.hidden = true;
+  renderTex(rendered, web);
+
+  const views = { texto: text.replace(/\n+$/, ""), LaTeX: tex };
+  const toggles = Object.keys(views).map((name) => {
+    const button = node("button", "", name);
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    button.addEventListener("click", () => {
+      const open = button.getAttribute("aria-pressed") !== "true";
+      toggles.forEach((other) => other.setAttribute("aria-pressed", "false"));
+      button.setAttribute("aria-pressed", String(open));
+      rendered.hidden = open;
+      alt.hidden = !open;
+      alt.textContent = open ? views[name] : "";
+    });
+    return button;
+  });
+
+  const copy = node("button", "", "copiar LaTeX");
+  copy.type = "button";
+  copy.title = "LaTeX para pdflatex (mathpartir)";
+  copy.addEventListener("click", async () => {
+    copy.textContent = (await copyText(tex)) ? "copiado" : "falhou";
+    setTimeout(() => (copy.textContent = "copiar LaTeX"), 1200);
+  });
+
+  bar.append(...toggles, copy);
+  box.append(bar, rendered, alt);
+  return box;
+}
+
+/**
+ * Os blocos de uma resposta, achatados em `[tipo, texto, web, tex, ...]`
+ * (quatro strings por bloco).
+ */
+function renderBlocks(parent, flat) {
+  for (let i = 0; i < flat.length; i += 4) {
+    const [kind, text, web, tex] = flat.slice(i, i + 4);
+
+    if (kind === "heading") parent.append(node("h3", "block-heading", text));
+    else if (kind === "math") parent.append(mathBlock(text, web, tex));
+    else addOutput(parent, kind === "error" ? "error" : "output", text);
+  }
+}
+
+function addEntry(input, kind, text, blocks = []) {
   const entry = document.createElement("div");
   entry.className = "entry";
 
@@ -121,7 +213,9 @@ function addEntry(input, kind, text) {
     row.append(prompt, document.createTextNode(input));
     entry.append(row);
   }
-  if (text) addOutput(entry, kind, text);
+
+  if (blocks.length > 0) renderBlocks(entry, blocks);
+  else if (text) addOutput(entry, kind, text);
 
   el.log.append(entry);
   scrollToEnd();
@@ -208,6 +302,73 @@ function insertAtCaret(text) {
   el.line.focus();
 }
 
+// --- referência: sintaxe e regras -------------------------------------------------
+
+let referenceTab = "syntax";
+
+function renderReference() {
+  const flat = referenceTab === "syntax" ? playground.syntax() : playground.rules();
+  el.reference.replaceChildren();
+
+  if (flat.length === 0) {
+    el.reference.append(node("p", "judgment", "Esta linguagem não declara esta referência."));
+    return;
+  }
+
+  if (referenceTab === "syntax") {
+    for (let i = 0; i < flat.length; i += 4) {
+      if (flat[i] !== "math") continue;
+      const holder = node("div", "syntax-table");
+      renderTex(holder, flat[i + 2]);
+      el.reference.append(holder);
+    }
+    return;
+  }
+
+  // regras: um título por julgamento, a forma do julgamento e um cartão por regra
+  let group = null;
+  let cards = null;
+  let expectJudgment = false;
+
+  for (let i = 0; i < flat.length; i += 4) {
+    const [kind, text, web] = flat.slice(i, i + 4);
+
+    if (kind === "heading") {
+      group = node("section", "rule-group");
+      group.append(node("h3", "", text));
+      el.reference.append(group);
+      expectJudgment = true;
+    } else if (kind === "math" && group) {
+      if (expectJudgment) {
+        const line = node("p", "judgment", "Julgamento: ");
+        const formula = node("span");
+        renderTex(formula, web, { display: false });
+        line.append(formula);
+        group.append(line);
+        cards = node("div", "cards");
+        group.append(cards);
+        expectJudgment = false;
+      } else {
+        const card = node("div", "rule-card");
+        renderTex(card, web);
+        cards.append(card);
+      }
+    }
+  }
+}
+
+function selectTab(name) {
+  referenceTab = name;
+  el.tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.tab === name)));
+  if (el.referencePanel.open) renderReference();
+}
+
+el.tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.tab)));
+// a referência é renderizada só quando o painel abre (são dezenas de fórmulas)
+el.referencePanel.addEventListener("toggle", () => {
+  if (el.referencePanel.open) renderReference();
+});
+
 // --- execução ----------------------------------------------------------------
 
 function execute(line) {
@@ -218,10 +379,12 @@ function execute(line) {
 
   let kind;
   let text;
+  let blocks = [];
   try {
     const reply = playground.submit(line);
     kind = reply.kind;
     text = reply.text;
+    blocks = reply.blocks;
     reply.free();
   } catch (error) {
     kind = "error";
@@ -231,7 +394,7 @@ function execute(line) {
     openLanguage(playground.language(), {}, { quiet: true });
   }
 
-  addEntry(line, kind, text);
+  addEntry(line, kind, text, blocks);
   syncControls();
   renderDefinitions();
 
@@ -258,6 +421,7 @@ function openLanguage(name, params = {}, { quiet = false } = {}) {
   syncControls();
   renderExamples();
   renderDefinitions();
+  if (el.referencePanel.open) renderReference();
 
   if (!quiet) {
     clearLog();

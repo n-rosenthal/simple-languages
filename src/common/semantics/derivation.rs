@@ -7,7 +7,7 @@
 use std::fmt::{self, Write};
 
 use crate::common::context::Context;
-use crate::common::latex::inference;
+use crate::common::latex::{inference, web_inference};
 use crate::common::ToLatex;
 
 use super::Rule;
@@ -85,6 +85,17 @@ impl<J: ToLatex, R: Rule> Derivation<J, R> {
             self.premises.iter().map(Self::to_latex_tree).collect();
 
         inference(&premises, &self.conclusion.to_latex(), &self.rule.to_latex())
+    }
+}
+
+impl<J: ToLatex, R: Rule> Derivation<J, R> {
+    /// A árvore completa para o KaTeX: `\dfrac` aninhados, com o nome de cada
+    /// regra à direita da barra. (`\inferrule*` do `mathpartir` não existe
+    /// no navegador.)
+    pub fn to_katex_tree(&self) -> String {
+        let premises: Vec<String> = self.premises.iter().map(Self::to_katex_tree).collect();
+
+        web_inference(&premises, &self.conclusion.to_latex(), &self.rule.to_katex())
     }
 }
 

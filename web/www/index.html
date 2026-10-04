@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TAPL playground</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <link rel="stylesheet" href="style.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
 </head>
 <body>
   <header>
@@ -55,6 +57,15 @@
       </p>
     </aside>
   </main>
+
+  <details id="reference-panel">
+    <summary>Referência da linguagem: sintaxe e regras de inferência</summary>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="syntax" aria-selected="true">Sintaxe</button>
+      <button type="button" role="tab" data-tab="rules" aria-selected="false">Regras</button>
+    </div>
+    <div id="reference" class="reference"></div>
+  </details>
 
   <noscript>Esta página precisa de JavaScript e WebAssembly.</noscript>
   <script type="module" src="main.js"></script>

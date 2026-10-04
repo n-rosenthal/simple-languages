@@ -15,12 +15,13 @@
 
 use std::fmt::Display;
 
-use crate::common::machine_language::{compilation_is_correct, Compile};
+use crate::common::document::Block;
+use crate::common::machine_language::{compilation_is_correct, Compile, MachineRule};
 use crate::common::semantics::laws::{
     final_states_do_not_step, preservation, small_step_agrees_with_big_step,
     trace_is_connected, well_typed_evaluates, well_typed_never_gets_stuck,
 };
-use crate::common::semantics::{run, BigStep, Step, Typing};
+use crate::common::semantics::{run, BigStep, Rule, Step, Typing};
 use crate::common::ToLatex;
 
 /// Um termo de exemplo, com um título, para o REPL e para a página web.
@@ -28,6 +29,16 @@ use crate::common::ToLatex;
 pub struct Example {
     pub title: &'static str,
     pub source: &'static str,
+}
+
+/// Uma categoria sintática: `t ::= x | λx:T. t | ...` (em LaTeX, modo matemático).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Syntax {
+    /// O nome da categoria, para leitores: `termos`, `valores`, `tipos`.
+    pub title: &'static str,
+    /// A metavariável: `t`, `v`, `T`.
+    pub meta: &'static str,
+    pub productions: &'static [&'static str],
 }
 
 pub trait Language {
@@ -57,6 +68,11 @@ pub trait Language {
 
     /// Exemplos mostrados no REPL (`:examples`) e na página web.
     fn examples() -> &'static [Example] {
+        &[]
+    }
+
+    /// A gramática da linguagem, mostrada por `:syntax` e na página web.
+    fn syntax() -> &'static [Syntax] {
         &[]
     }
 
@@ -105,4 +121,100 @@ pub fn law_violations<L: Language>(term: &L::Term) -> Vec<&'static str> {
     );
 
     violated
+}
+
+// =============================================================================
+// Referência: sintaxe e regras
+// =============================================================================
+
+/// A gramática como uma tabela `array` alinhada em `::=`.
+fn syntax_latex(items: &[Syntax]) -> String {
+    let mut out = String::from(r"\begin{array}{llcl}");
+
+    for (i, item) in items.iter().enumerate() {
+        for (j, production) in item.productions.iter().enumerate() {
+            let (title, meta, separator) = if j == 0 {
+                (format!(r"\text{{{}}}", item.title), item.meta.to_string(), "::=")
+            } else {
+                (String::new(), String::new(), r"\mid")
+            };
+
+            let end = j + 1 == item.productions.len();
+            let last_group = i + 1 == items.len();
+            let line_break = match (end, last_group) {
+                (true, true) => "",
+                (true, false) => r" \\[0.7em]",
+                (false, _) => r" \\",
+            };
+
+            out.push_str(&format!("\n{title} & {meta} & {separator} & {production}{line_break}"));
+        }
+    }
+
+    out.push_str("\n\\end{array}");
+    out
+}
+
+/// A gramática de `L`, como blocos para o terminal e para a página.
+pub fn syntax_blocks<L: Language>() -> Vec<Block> {
+    let items = L::syntax();
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let latex = syntax_latex(items);
+    vec![
+        Block::Heading("sintaxe".to_string()),
+        Block::math(latex.clone(), latex.clone(), latex),
+    ]
+}
+
+fn rule_group<R: Rule>(out: &mut Vec<Block>, title: &str, judgment: &str, rules: &[R]) {
+    if rules.is_empty() {
+        return;
+    }
+
+    out.push(Block::Heading(title.to_string()));
+    out.push(Block::math(judgment, judgment, judgment));
+
+    for rule in rules {
+        let (web, tex) = match rule.schema() {
+            Some(schema) => (schema.to_katex(rule.name()), schema.to_latex(rule.name())),
+            None => (rule.to_katex(), rule.to_latex()),
+        };
+        out.push(Block::math(tex.clone(), web, tex));
+    }
+}
+
+/// As regras de `L`, agrupadas por julgamento: tipagem, as duas semânticas e
+/// a máquina virtual (compartilhada por todas as linguagens).
+pub fn rule_blocks<L: Language>() -> Vec<Block> {
+    let mut out = Vec::new();
+
+    rule_group(
+        &mut out,
+        "tipagem",
+        r"\Gamma \vdash t : T",
+        <<L::Typing as Typing>::Rule as Rule>::all(),
+    );
+    rule_group(
+        &mut out,
+        "semântica estrutural (small-step)",
+        r"t \to t'",
+        <<L::Small as Step>::Rule as Rule>::all(),
+    );
+    rule_group(
+        &mut out,
+        "semântica natural (big-step)",
+        r"t \Downarrow v",
+        <<L::Big as BigStep>::Rule as Rule>::all(),
+    );
+    rule_group(
+        &mut out,
+        "máquina virtual (memória μ omitida onde não é usada)",
+        r"\langle c,\ s,\ e,\ f \rangle \to \langle c',\ s',\ e',\ f' \rangle",
+        MachineRule::all(),
+    );
+
+    out
 }

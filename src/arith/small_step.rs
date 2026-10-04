@@ -11,17 +11,30 @@ use super::values::{apply, Value};
 crate::rules! {
     pub enum SmallStepRule {
         /// t1 → t1'  ⟹  t1 op t2 → t1' op t2
-        BinaryLeft => "E-Bin1",
+        BinaryLeft => "E-Bin1" {
+            [r"t_1 \to t_1'"] => r"t_1 \oplus t_2 \to t_1' \oplus t_2"
+        },
         /// v1 valor, t2 → t2'  ⟹  v1 op t2 → v1 op t2'
-        BinaryRight => "E-Bin2",
+        BinaryRight => "E-Bin2" {
+            [r"t_2 \to t_2'"] => r"v_1 \oplus t_2 \to v_1 \oplus t_2'"
+        },
         /// v1, v2 valores  ⟹  v1 op v2 → resultado
-        BinaryCompute => "E-BinConst",
+        BinaryCompute => "E-BinConst" {
+            [r"v = v_1 \oplus v_2"] => r"v_1 \oplus v_2 \to v"
+        },
         /// t1 → t1'  ⟹  if t1 then t2 else t3 → if t1' then t2 else t3
-        IfCongruence => "E-If",
+        IfCongruence => "E-If" {
+            [r"t_1 \to t_1'"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to \mathsf{if}\ t_1'\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3"
+        },
         /// if true then t2 else t3 → t2
-        IfTrue => "E-IfTrue",
+        IfTrue => "E-IfTrue" {
+            [] => r"\mathsf{if}\ \mathsf{true}\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to t_2"
+        },
         /// if false then t2 else t3 → t3
-        IfFalse => "E-IfFalse",
+        IfFalse => "E-IfFalse" {
+            [] => r"\mathsf{if}\ \mathsf{false}\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to t_3"
+        },
     }
 }
 

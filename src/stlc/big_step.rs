@@ -31,12 +31,24 @@ pub const MAX_DEPTH: usize = 200;
 
 crate::rules! {
     pub enum EvalRule {
-        True => "E-True",
-        False => "E-False",
-        IfTrue => "E-IfTrue",
-        IfFalse => "E-IfFalse",
-        Abs => "E-Abs",
-        App => "E-App",
+        True => "E-True" { [] => r"\mathsf{true} \Downarrow \mathsf{true}" },
+        False => "E-False" { [] => r"\mathsf{false} \Downarrow \mathsf{false}" },
+        IfTrue => "E-IfTrue" {
+            [r"t_1 \Downarrow \mathsf{true}", r"t_2 \Downarrow v"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \Downarrow v"
+        },
+        IfFalse => "E-IfFalse" {
+            [r"t_1 \Downarrow \mathsf{false}", r"t_3 \Downarrow v"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \Downarrow v"
+        },
+        Abs => "E-Abs" { [] => r"\lambda x{:}T.\, t \Downarrow \lambda x{:}T.\, t" },
+        App => "E-App" {
+            [
+                r"t_1 \Downarrow \lambda x{:}T.\, t_{12}",
+                r"t_2 \Downarrow v_2",
+                r"[x \mapsto v_2]\, t_{12} \Downarrow v"
+            ] => r"t_1\ t_2 \Downarrow v"
+        },
     }
 }
 

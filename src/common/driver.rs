@@ -11,9 +11,11 @@
 use std::marker::PhantomData;
 use std::str::FromStr;
 
+use crate::common::document::{blocks_to_text, Block};
 use crate::common::language::{law_violations, Language};
 use crate::common::machine_language::{Compile, Vm};
 use crate::common::semantics::{run_with_fuel, BigStep, Machine, Typing, DEFAULT_FUEL};
+use crate::common::ToLatex;
 
 // =============================================================================
 // Options
@@ -120,14 +122,24 @@ pub fn execute_with<L: Language>(
 }
 
 /// Executa `command` sobre um termo já lido (o interpretador expande as
-/// definições antes de chamar).
+/// definições antes de chamar), devolvendo o texto do terminal.
 pub fn execute_term<L: Language>(
     command: Command,
     term: &L::Term,
     options: &Options,
 ) -> Result<String, String> {
+    execute_blocks::<L>(command, term, options).map(|blocks| blocks_to_text(&blocks))
+}
+
+/// Como [`execute_term`], mas devolve os blocos (texto, fórmulas, títulos),
+/// que a página web renderiza com o KaTeX.
+pub fn execute_blocks<L: Language>(
+    command: Command,
+    term: &L::Term,
+    options: &Options,
+) -> Result<Vec<Block>, String> {
     match command {
-        Command::Parse => Ok(format!("{term}\n")),
+        Command::Parse => Ok(vec![term_block::<L>(term)]),
         Command::Type => typing::<L>(term),
         Command::Small => Ok(small_step::<L>(term, options)),
         Command::Big => big_step::<L>(term),
@@ -139,44 +151,54 @@ pub fn execute_term<L: Language>(
     }
 }
 
-fn typing<L: Language>(term: &L::Term) -> Result<String, String> {
+fn term_block<L: Language>(term: &L::Term) -> Block {
+    Block::math(format!("{term}\n"), term.to_latex(), term.to_latex())
+}
+
+fn typing<L: Language>(term: &L::Term) -> Result<Vec<Block>, String> {
     let derivation =
         <L::Typing as Typing>::check(term).map_err(|e| format!("type error: {e}"))?;
 
-    Ok(format!(
-        "type: {}\n{}",
-        derivation.conclusion.ty,
-        derivation.to_text()
-    ))
+    Ok(vec![Block::math(
+        format!("type: {}\n{}", derivation.conclusion.ty, derivation.to_text()),
+        derivation.to_katex_tree(),
+        derivation.to_latex_tree(),
+    )])
 }
 
-fn small_step<L: Language>(term: &L::Term, options: &Options) -> String {
-    run_with_fuel::<L::Small>(term.clone(), options.fuel).to_text_limited(options.max_steps_shown)
+fn small_step<L: Language>(term: &L::Term, options: &Options) -> Vec<Block> {
+    let trace = run_with_fuel::<L::Small>(term.clone(), options.fuel);
+
+    vec![Block::math(
+        trace.to_text_limited(options.max_steps_shown),
+        trace.to_katex_limited(options.max_steps_shown),
+        trace.to_latex_limited(options.max_steps_shown),
+    )]
 }
 
-fn big_step<L: Language>(term: &L::Term) -> Result<String, String> {
+fn big_step<L: Language>(term: &L::Term) -> Result<Vec<Block>, String> {
     let derivation =
         <L::Big as BigStep>::evaluate(term).map_err(|e| format!("evaluation error: {e}"))?;
 
-    Ok(format!(
-        "value: {}\n{}",
-        derivation.conclusion.value,
-        derivation.to_text()
-    ))
+    Ok(vec![Block::math(
+        format!("value: {}\n{}", derivation.conclusion.value, derivation.to_text()),
+        derivation.to_katex_tree(),
+        derivation.to_latex_tree(),
+    )])
 }
 
-fn compile<L: Language>(term: &L::Term) -> Result<String, String> {
+fn compile<L: Language>(term: &L::Term) -> Result<Vec<Block>, String> {
     let program =
         <L::Compiler as Compile>::compile(term).map_err(|e| format!("compile error: {e}"))?;
 
-    Ok(program.to_string())
+    Ok(vec![Block::Text(program.to_string())])
 }
 
 fn machine<L: Language>(
     term: &L::Term,
     verbose: bool,
     options: &Options,
-) -> Result<String, String> {
+) -> Result<Vec<Block>, String> {
     let program =
         <L::Compiler as Compile>::compile(term).map_err(|e| format!("compile error: {e}"))?;
     let execution = Vm::execute_with_fuel(&program, options.fuel);
@@ -195,61 +217,82 @@ fn machine<L: Language>(
         None => out.push_str("no value\n"),
     }
 
-    Ok(out)
+    Ok(vec![Block::Text(out)])
 }
 
-fn latex<L: Language>(term: &L::Term, options: &Options) -> String {
-    let mut out = String::new();
+/// O modo `latex`: as três derivações como fórmulas, cujo `text` é o código
+/// LaTeX (`mathpartir`) para colar em um `.tex`.
+fn latex<L: Language>(term: &L::Term, options: &Options) -> Vec<Block> {
+    let mut out = Vec::new();
 
     match <L::Typing as Typing>::check(term) {
-        Ok(d) => out.push_str(&format!("% typing\n\\[\n{}\n\\]\n\n", d.to_latex_tree())),
-        Err(e) => out.push_str(&format!("% type error: {e}\n\n")),
+        Ok(d) => {
+            let tex = d.to_latex_tree();
+            out.push(Block::math(
+                format!("% typing\n\\[\n{tex}\n\\]\n\n"),
+                d.to_katex_tree(),
+                tex,
+            ));
+        }
+        Err(e) => out.push(Block::Error(format!("% type error: {e}\n\n"))),
     }
 
     match <L::Big as BigStep>::evaluate(term) {
-        Ok(d) => out.push_str(&format!("% big-step\n\\[\n{}\n\\]\n\n", d.to_latex_tree())),
-        Err(e) => out.push_str(&format!("% evaluation error: {e}\n\n")),
+        Ok(d) => {
+            let tex = d.to_latex_tree();
+            out.push(Block::math(
+                format!("% big-step\n\\[\n{tex}\n\\]\n\n"),
+                d.to_katex_tree(),
+                tex,
+            ));
+        }
+        Err(e) => out.push(Block::Error(format!("% evaluation error: {e}\n\n"))),
     }
 
     let trace = run_with_fuel::<L::Small>(term.clone(), options.fuel);
-    out.push_str(&format!("% small-step\n\\[\n{}\n\\]\n", trace.to_latex()));
+    let tex = trace.to_latex_limited(options.max_steps_shown);
+    out.push(Block::math(
+        format!("% small-step\n\\[\n{tex}\n\\]\n"),
+        trace.to_katex_limited(options.max_steps_shown),
+        tex,
+    ));
 
     out
 }
 
-fn laws<L: Language>(term: &L::Term) -> String {
+fn laws<L: Language>(term: &L::Term) -> Vec<Block> {
     let violated = law_violations::<L>(term);
 
-    if violated.is_empty() {
+    let text = if violated.is_empty() {
         "all laws hold\n".to_string()
     } else {
         format!("violated: {}\n", violated.join(", "))
-    }
+    };
+    vec![Block::Text(text)]
 }
 
-fn push_section(out: &mut String, title: &str, body: Result<String, String>) {
-    let text = match body {
-        Ok(text) | Err(text) => text,
-    };
-    out.push_str(&format!("== {title} ==\n{text}"));
-    if !text.ends_with('\n') {
-        out.push('\n');
+/// Uma seção de `full`: um título e o resultado do estágio (um erro de um
+/// estágio vira um bloco de erro, e os demais continuam).
+fn section(out: &mut Vec<Block>, title: &str, body: Result<Vec<Block>, String>) {
+    out.push(Block::Heading(title.to_string()));
+    match body {
+        Ok(blocks) => out.extend(blocks),
+        Err(text) => out.push(Block::Error(text)),
     }
-    out.push('\n');
 }
 
 /// Todos os estágios. Cada um é independente (os tipos são apagados na
 /// compilação), então um termo mal tipado ainda mostra como trava.
-fn full<L: Language>(term: &L::Term, options: &Options) -> String {
-    let mut out = String::new();
+fn full<L: Language>(term: &L::Term, options: &Options) -> Vec<Block> {
+    let mut out = Vec::new();
 
-    push_section(&mut out, "term", Ok(format!("{term}")));
-    push_section(&mut out, "type", typing::<L>(term));
-    push_section(&mut out, "small-step", Ok(small_step::<L>(term, options)));
-    push_section(&mut out, "big-step", big_step::<L>(term));
-    push_section(&mut out, "machine code", compile::<L>(term));
-    push_section(&mut out, "machine", machine::<L>(term, false, options));
-    push_section(&mut out, "laws", Ok(laws::<L>(term)));
+    section(&mut out, "term", Ok(vec![term_block::<L>(term)]));
+    section(&mut out, "type", typing::<L>(term));
+    section(&mut out, "small-step", Ok(small_step::<L>(term, options)));
+    section(&mut out, "big-step", big_step::<L>(term));
+    section(&mut out, "machine code", compile::<L>(term));
+    section(&mut out, "machine", machine::<L>(term, false, options));
+    section(&mut out, "laws", Ok(laws::<L>(term)));
 
     out
 }

@@ -154,3 +154,80 @@ kbd { font: 11px ui-monospace, monospace; padding: 0 0.3rem; background: var(--c
   #console { max-height: none; }
   aside { max-height: none; }
 }
+
+/* --- blocos de saída: títulos, fórmulas (KaTeX) ------------------------------- */
+
+.block-heading {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.block-heading:first-child { margin-top: 0.2rem; }
+
+.block.math {
+  margin: 0.25rem 0 0.5rem;
+  background: var(--code);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+}
+.block.math .bar {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  padding: 0.25rem 0.4rem 0;
+}
+.block.math .bar button {
+  padding: 0 0.45rem;
+  font-size: 0.72rem;
+  opacity: 0.6;
+}
+.block.math .bar button:hover,
+.block.math .bar button[aria-pressed="true"] { opacity: 1; }
+
+.block.math .rendered {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1rem 0.8rem 0.5rem;
+}
+.block.math .rendered .katex-display { margin: 0.35em 0; }
+.block.math .rendered .katex { font-size: 1.05em; }
+.block.math .rendered.tex-failed { font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; color: var(--error); }
+
+.block.math .alt {
+  margin: 0;
+  padding: 0.3rem 0.8rem 0.6rem;
+  font: 12px/1.45 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- referência: sintaxe e regras ---------------------------------------------- */
+
+#reference-panel {
+  margin: 0 1rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 1rem 0.8rem;
+}
+#reference-panel summary { cursor: pointer; padding: 0.3rem 0; font-weight: 600; }
+
+.tabs { display: flex; gap: 0.4rem; margin: 0.5rem 0; }
+.tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+
+.reference .rule-group { margin-bottom: 1.1rem; }
+.reference .rule-group h3 { margin: 0.6rem 0 0.2rem; font-size: 0.95rem; }
+.reference .judgment { margin: 0 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
+.reference .cards { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.reference .rule-card {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2rem 0.8rem;
+  background: var(--code);
+  border-radius: 6px;
+}
+.reference .rule-card .katex-display { margin: 0.4em 0; }
+.reference .syntax-table { overflow-x: auto; padding: 0.2rem 0.5rem; background: var(--code); border-radius: 6px; }

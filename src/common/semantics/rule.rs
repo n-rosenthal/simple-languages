@@ -10,41 +10,89 @@
 
 use std::fmt;
 
+use crate::common::latex::{inference, web_inference, web_label};
 use crate::common::ToLatex;
+
+/// O esquema de uma regra: premissas e conclusão em LaTeX (modo matemático),
+/// como nas figuras do livro. É dado, não código, para a interface poder
+/// mostrar as regras de cada linguagem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schema {
+    pub premises: &'static [&'static str],
+    pub conclusion: &'static str,
+}
+
+impl Schema {
+    /// Para `pdflatex` (`mathpartir`).
+    pub fn to_latex(&self, name: &str) -> String {
+        let premises: Vec<String> = self.premises.iter().map(|p| p.to_string()).collect();
+        inference(&premises, self.conclusion, &format!(r"\textsc{{{name}}}"))
+    }
+
+    /// Para o navegador (KaTeX).
+    pub fn to_katex(&self, name: &str) -> String {
+        let premises: Vec<String> = self.premises.iter().map(|p| p.to_string()).collect();
+        web_inference(&premises, self.conclusion, &web_label(name))
+    }
+}
 
 /// Uma regra de inferência identificada por nome.
 ///
 /// `Copy` porque, em TAPL, regras são apenas nomes; se alguma linguagem
 /// precisar de regras com dados associados, relaxe para `Clone`.
-pub trait Rule: Copy + Eq + fmt::Debug + fmt::Display + ToLatex {
+pub trait Rule: Copy + Eq + fmt::Debug + fmt::Display + ToLatex + 'static {
     /// Nome da regra na notação do livro, por exemplo `"E-IfTrue"`.
     fn name(&self) -> &'static str;
+
+    /// Premissas e conclusão, quando a regra declara um esquema.
+    fn schema(&self) -> Option<Schema>;
+
+    /// Todas as regras do conjunto, na ordem de declaração.
+    fn all() -> &'static [Self]
+    where
+        Self: Sized;
+
+    /// O nome da regra para o KaTeX (que não tem `\textsc`).
+    fn to_katex(&self) -> String {
+        web_label(self.name())
+    }
 }
 
 /// Gera uma enum de regras com `Rule`, `Display` e `ToLatex`.
 ///
 /// ```ignore
 /// rules! {
-///     /// Regras de tipagem de `lambda`.
+///     /// Regras de tipagem.
 ///     pub enum TypingRule {
-///         /// x : T ∈ Γ
-///         Var => "T-Var",
-///         Abs => "T-Abs",
-///         App => "T-App",
+///         /// x:T ∈ Γ  ⟹  Γ ⊢ x : T
+///         Var => "T-Var" {
+///             [r"x{:}T \in \Gamma"] => r"\Gamma \vdash x : T"
+///         },
+///         True => "T-True" { [] => r"\Gamma \vdash \mathsf{true} : \mathsf{Bool}" },
+///         Plain => "T-Plain",   // sem esquema
 ///     }
 /// }
 /// ```
 ///
-/// A enum derivada é `Debug, Clone, Copy, PartialEq, Eq, Hash`.
-/// `Display` imprime o nome; `ToLatex` produz `\textsc{nome}`.
+/// O bloco `{ [premissas] => conclusão }` é opcional. A enum derivada é
+/// `Debug, Clone, Copy, PartialEq, Eq, Hash`, com `ALL`; `Display` imprime o
+/// nome e `ToLatex` produz `\textsc{nome}`.
 #[macro_export]
 macro_rules! rules {
+    (@schema) => { None };
+    (@schema [ $($premise:literal),* ] $conclusion:literal) => {
+        Some($crate::common::semantics::Schema {
+            premises: &[ $($premise),* ],
+            conclusion: $conclusion,
+        })
+    };
     (
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
             $(
                 $(#[$vmeta:meta])*
                 $variant:ident => $label:literal
+                $( { [ $($premise:literal),* $(,)? ] => $conclusion:literal $(,)? } )?
             ),+ $(,)?
         }
     ) => {
@@ -57,11 +105,28 @@ macro_rules! rules {
             )+
         }
 
+        impl $name {
+            /// Todas as regras, na ordem de declaração.
+            pub const ALL: &'static [$name] = &[ $(Self::$variant),+ ];
+        }
+
         impl $crate::common::semantics::Rule for $name {
             fn name(&self) -> &'static str {
                 match self {
                     $( Self::$variant => $label, )+
                 }
+            }
+
+            fn schema(&self) -> Option<$crate::common::semantics::Schema> {
+                match self {
+                    $(
+                        Self::$variant => $crate::rules!(@schema $( [ $($premise),* ] $conclusion )?),
+                    )+
+                }
+            }
+
+            fn all() -> &'static [Self] {
+                Self::ALL
             }
         }
 

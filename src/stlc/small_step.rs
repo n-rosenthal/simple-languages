@@ -21,12 +21,25 @@ use super::terms::Term;
 
 crate::rules! {
     pub enum StepRule {
-        App1 => "E-App1",
-        App2 => "E-App2",
-        AppAbs => "E-AppAbs",
-        If => "E-If",
-        IfTrue => "E-IfTrue",
-        IfFalse => "E-IfFalse",
+        App1 => "E-App1" {
+            [r"t_1 \to t_1'"] => r"t_1\ t_2 \to t_1'\ t_2"
+        },
+        App2 => "E-App2" {
+            [r"t_2 \to t_2'"] => r"v_1\ t_2 \to v_1\ t_2'"
+        },
+        AppAbs => "E-AppAbs" {
+            [] => r"(\lambda x{:}T_{11}.\, t_{12})\ v_2 \to [x \mapsto v_2]\, t_{12}"
+        },
+        If => "E-If" {
+            [r"t_1 \to t_1'"]
+                => r"\mathsf{if}\ t_1\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to \mathsf{if}\ t_1'\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3"
+        },
+        IfTrue => "E-IfTrue" {
+            [] => r"\mathsf{if}\ \mathsf{true}\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to t_2"
+        },
+        IfFalse => "E-IfFalse" {
+            [] => r"\mathsf{if}\ \mathsf{false}\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to t_3"
+        },
     }
 }
 

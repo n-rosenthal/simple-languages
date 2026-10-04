@@ -1,35 +1,38 @@
 use simple_languages::common::machine_language::{Compile, Vm};
 use simple_languages::common::semantics::{run, BigStep, Machine, Typing};
 use simple_languages::common::{Lexer, Parser, Scanner};
-use simple_languages::lambda::{
-    LambdaBigStep, LambdaCompiler, LambdaLexer, LambdaParser, LambdaScanner, LambdaSmallStep,
-    LambdaTyping,
-};
+use simple_languages::stlc::language::Stlc;
+use simple_languages::stlc::lexer::StlcLexer;
+use simple_languages::stlc::parser::StlcParser;
+use simple_languages::stlc::scanner::StlcScanner;
+use std::io::{stdin, stdout, Write};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source = "(λf:A->A. λx:A. f x) (λy:A. y)";
+fn main() {
+    let mut stdin = stdin();
+    let mut stdout = stdout();
+    let mut buffer = String::new();
 
-    let lines = LambdaScanner::scan(source)?;
-    let tokens = LambdaLexer::analyze(&lines)?;
-    let term = LambdaParser::parse(&tokens)?;
+    loop {
+        buffer.clear();
+        stdout.write(b"> ").unwrap();
+        stdout.flush().unwrap();
+        stdin.read_line(&mut buffer).unwrap();
 
-    let typing = LambdaTyping::check(&term)?;
-    println!("term:  {term}");
-    println!("type:  {}", typing.conclusion.ty);
-    println!("typing rules (postorder): {:?}\n", typing.postorder_rules());
+        if buffer.is_empty() {
+            break;
+        }
 
-    println!("small-step:");
-    print!("{}", run::<LambdaSmallStep>(term.clone()).to_text());
+        let mut scanner = StlcScanner::new(&buffer);
+        let mut lexer = StlcLexer::new(&mut scanner);
+        let mut parser = StlcParser::new(&mut lexer);
+        let ast = parser.parse().unwrap();
 
-    let big = LambdaBigStep::evaluate(&term)?;
-    println!("\nbig-step:\n{}", big.to_text());
-    println!("latex:\n{}\n", big.to_latex_tree());
+        let machine = Vm::new();
+        let typing = Typing::new();
+        let big_step = BigStep::new();
+        let compile = Compile::new();
+        let semantics = run(&ast, &machine, &typing, &big_step, &compile);
 
-    let program = LambdaCompiler::compile(&term)?;
-    println!("machine code:\n{program}");
-
-    let execution = Vm::execute(&program);
-    println!("machine: {} ({} steps)", execution.trace.outcome, execution.trace.len());
-
-    Ok(())
+        println!("{}", semantics);
+    }
 }
