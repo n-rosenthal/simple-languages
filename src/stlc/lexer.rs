@@ -42,7 +42,7 @@ const SPEC: LexSpec<StlcTokenType> = LexSpec {
     ],
     integer: None,
     words: Words::Identifier(T::Identifier),
-    line_comment: None,
+    ..LexSpec::EMPTY
 };
 
 pub struct StlcLexer;

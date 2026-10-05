@@ -11,7 +11,7 @@
 //! atype       ::= IDENT | "(" type ")"
 //! ```
 
-use crate::common::frontend::parse_complete;
+use crate::common::frontend::{delimited, left_chain, parse_binary, parse_complete, Level};
 use crate::common::Parser;
 
 use super::terms::Term;
@@ -20,6 +20,15 @@ use super::types::Type;
 
 pub type TokenStream<'a> = crate::common::frontend::TokenStream<'a, StlcTokenType>;
 pub type ParseError = crate::common::frontend::ParseError<StlcTokenType>;
+
+use StlcTokenType as T;
+
+/// Os tokens que começam um átomo, e portanto continuam uma aplicação.
+const APPLICATION_STARTS: &[StlcTokenType] =
+    &[T::Identifier, T::LParen, T::Lambda, T::True, T::False, T::If];
+
+/// Um único nível: `->`, associado à direita.
+const TYPE_LEVELS: &[Level<StlcTokenType, ()>] = &[Level::right(&[(T::Arrow, ())])];
 
 // =============================================================================
 // Parser
@@ -34,50 +43,18 @@ impl StlcParser {
 
     /// term ::= atom atom*
     fn parse_term(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
-        let mut lhs = Self::parse_atom(stream)?;
-
-        while matches!(
-            stream.peek_kind(),
-            Some(StlcTokenType::Identifier)
-                | Some(StlcTokenType::LParen)
-                | Some(StlcTokenType::Lambda)
-                | Some(StlcTokenType::True)
-                | Some(StlcTokenType::False)
-                | Some(StlcTokenType::If)
-        ) {
-            let rhs = Self::parse_atom(stream)?;
-            lhs = Term::app(lhs, rhs);
-        }
-
-        Ok(lhs)
+        left_chain(stream, APPLICATION_STARTS, &Self::parse_atom, &Term::app)
     }
 
     /// atom ::= IDENT | "true" | "false" | "(" term ")" | abstraction | conditional
     fn parse_atom(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
         match stream.peek_kind() {
-            Some(StlcTokenType::Lambda) => return Self::parse_abstraction(stream),
-            Some(StlcTokenType::If) => return Self::parse_conditional(stream),
-            _ => {}
-        }
-
-        let token = stream.advance()?;
-
-        match token.kind {
-            StlcTokenType::Identifier => Ok(Term::variable(token.lexeme)),
-            StlcTokenType::True => Ok(Term::boolean(true)),
-            StlcTokenType::False => Ok(Term::boolean(false)),
-
-            StlcTokenType::LParen => {
-                let term = Self::parse_term(stream)?;
-                stream.expect(StlcTokenType::RParen)?;
-                Ok(term)
-            }
-
-            found => Err(ParseError::UnexpectedToken {
-                expected: None,
-                found,
-                span: token.span,
-            }),
+            Some(T::Lambda) => Self::parse_abstraction(stream),
+            Some(T::If) => Self::parse_conditional(stream),
+            Some(T::LParen) => delimited(stream, T::LParen, T::RParen, Self::parse_term),
+            Some(T::True | T::False) => Ok(Term::boolean(stream.advance()?.kind == T::True)),
+            Some(T::Identifier) => Ok(Term::variable(stream.advance()?.lexeme)),
+            _ => Err(stream.unexpected()),
         }
     }
 
@@ -107,35 +84,17 @@ impl StlcParser {
 
     /// type ::= atype ("->" type)?
     fn parse_type(stream: &mut TokenStream<'_>) -> Result<Type, ParseError> {
-        let from = Self::parse_atomic_type(stream)?;
-
-        if stream.peek_kind() == Some(StlcTokenType::Arrow) {
-            stream.next();
-            let to = Self::parse_type(stream)?; // associativo à direita
-            return Ok(Type::arrow(from, to));
-        }
-
-        Ok(from)
+        parse_binary(stream, TYPE_LEVELS, &Self::parse_atomic_type, &|(), from, to| {
+            Type::arrow(from, to)
+        })
     }
 
     /// atype ::= IDENT | "(" type ")"
     fn parse_atomic_type(stream: &mut TokenStream<'_>) -> Result<Type, ParseError> {
-        let token = stream.advance()?;
-
-        match token.kind {
-            StlcTokenType::Identifier => Ok(Type::base(token.lexeme)),
-
-            StlcTokenType::LParen => {
-                let ty = Self::parse_type(stream)?;
-                stream.expect(StlcTokenType::RParen)?;
-                Ok(ty)
-            }
-
-            found => Err(ParseError::UnexpectedToken {
-                expected: None,
-                found,
-                span: token.span,
-            }),
+        match stream.peek_kind() {
+            Some(T::Identifier) => Ok(Type::base(stream.advance()?.lexeme)),
+            Some(T::LParen) => delimited(stream, T::LParen, T::RParen, Self::parse_type),
+            _ => Err(stream.unexpected()),
         }
     }
 

@@ -12,11 +12,31 @@ use super::values::{apply, Value};
 
 crate::rules! {
     pub enum EvalRule {
-        Integer => "E-Int" { [] => r"n \Downarrow n" },
-        Boolean => "E-Bool" { [] => r"b \Downarrow b" },
-        Add => "E-Add" {
-            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 + t_2 \Downarrow n_1 + n_2"
+        Integer => "E-Int" {
+            [] => r"n \Downarrow n"
         },
+        Boolean => "E-Bool" {
+            [] => r"b \Downarrow b"
+        },
+
+        Zero => "E-Zero" {
+            [] => r"0 \Downarrow 0"
+        },
+        Succ => "E-Succ" {
+            [r"t \Downarrow n"] => r"\operatorname{succ}(t) \Downarrow n + 1"
+        },
+        Pred => "E-Pred" {
+            [r"t \Downarrow n"] => r"\operatorname{pred}(t) \Downarrow n - 1"
+        },
+        IsZero => "E-IsZero" {
+            [r"t \Downarrow n"] => r"\operatorname{iszero}(t) \Downarrow (n = 0)"
+        },
+
+        Add => "E-Add" {
+            [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"]
+                => r"t_1 + t_2 \Downarrow n_1 + n_2"
+        },
+
         Sub => "E-Sub" {
             [r"t_1 \Downarrow n_1", r"t_2 \Downarrow n_2"] => r"t_1 - t_2 \Downarrow n_1 - n_2"
         },
@@ -54,10 +74,23 @@ crate::rules! {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvalError {
-    /// Operandos de tipo errado para o operador.
-    InvalidOperands { op: BinaryOp, lhs: Value, rhs: Value },
+    /// Operandos de tipo errado para um operador binário.
+    InvalidOperands {
+        op: BinaryOp,
+        lhs: Value,
+        rhs: Value,
+    },
+
+    /// Operando de tipo errado para uma operação unária.
+    InvalidUnaryOperand {
+        operation: &'static str,
+        found: Value,
+    },
+
     /// A condição de um `if` não avaliou para um booleano.
-    InvalidCondition { found: Value },
+    InvalidCondition {
+        found: Value,
+    },
 }
 
 impl fmt::Display for EvalError {
@@ -67,8 +100,17 @@ impl fmt::Display for EvalError {
                 f,
                 "operator `{op}` cannot be applied to `{lhs}` and `{rhs}`"
             ),
+
+            Self::InvalidUnaryOperand { operation, found } => write!(
+                f,
+                "operator `{operation}` cannot be applied to `{found}`"
+            ),
+
             Self::InvalidCondition { found } => {
-                write!(f, "if condition must be a Boolean, found `{found}`")
+                write!(
+                    f,
+                    "if condition must be a Boolean, found `{found}`"
+                )
             }
         }
     }
@@ -109,14 +151,98 @@ impl BigStep for ArithBigStep {
                 Eval { term: term.clone(), value: Value::Boolean(*b) },
                 EvalRule::Boolean,
             )),
+            Term::Zero => Ok(Derivation::axiom(
+                Eval {
+                    term: term.clone(),
+                    value: Value::Natural(0),
+                },
+                EvalRule::Zero,
+            )),
 
+            Term::Succ(t) => {
+                let d = Self::evaluate(t)?;
+
+                let n = match d.conclusion.value {
+                    Value::Natural(n) => n,
+
+                    found => {
+                        return Err(EvalError::InvalidUnaryOperand {
+                            operation: "succ",
+                            found,
+                        });
+                    }
+                };
+
+                Ok(Derivation::node(
+                    Eval {
+                        term: term.clone(),
+                        value: Value::Natural(n + 1),
+                    },
+                    EvalRule::Succ,
+                    vec![d],
+                ))
+            }
+
+            Term::Pred(t) => {
+                let d = Self::evaluate(t)?;
+
+                let n = match d.conclusion.value {
+                    Value::Natural(n) => n,
+
+                    found => {
+                        return Err(EvalError::InvalidUnaryOperand {
+                            operation: "pred",
+                            found,
+                        });
+                    }
+                };
+
+                Ok(Derivation::node(
+                    Eval {
+                        term: term.clone(),
+                        value: Value::Natural(n.saturating_sub(1)),
+                    },
+                    EvalRule::Pred,
+                    vec![d],
+                ))
+            }
+
+            Term::IsZero(t) => {
+                let d = Self::evaluate(t)?;
+
+                let n = match d.conclusion.value {
+                    Value::Natural(n) => n,
+
+                    found => {
+                        return Err(EvalError::InvalidUnaryOperand {
+                            operation: "iszero",
+                            found,
+                        });
+                    }
+                };
+
+                Ok(Derivation::node(
+                    Eval {
+                        term: term.clone(),
+                        value: Value::Boolean(n == 0),
+                    },
+                    EvalRule::IsZero,
+                    vec![d],
+                ))
+            }
+
+            //  Binary Operations
             Term::Binary { op, lhs, rhs } => {
                 let left = Self::evaluate(lhs)?;
                 let right = Self::evaluate(rhs)?;
-                let (l, r) = (left.conclusion.value, right.conclusion.value);
+
+                let (l, r) = (
+                    left.conclusion.value.clone(),
+                    right.conclusion.value.clone(),
+                );
 
                 let value = apply(*op, l, r)
-                    .ok_or(EvalError::InvalidOperands { op: *op, lhs: l, rhs: r })?;
+                    .ok_or(EvalError::InvalidOperands { op: *op, lhs: left.conclusion.value.clone(), rhs: right.conclusion.value.clone() })?;
 
                 Ok(Derivation::node(
                     Eval { term: term.clone(), value },
@@ -125,17 +251,19 @@ impl BigStep for ArithBigStep {
                 ))
             }
 
+
+            //  Conditional
             Term::If { condition, then_branch, else_branch } => {
                 let condition = Self::evaluate(condition)?;
 
-                let (rule, branch) = match condition.conclusion.value {
+                let (rule, branch) = match condition.conclusion.value.clone() {
                     Value::Boolean(true) => (EvalRule::IfTrue, then_branch),
                     Value::Boolean(false) => (EvalRule::IfFalse, else_branch),
                     found => return Err(EvalError::InvalidCondition { found }),
                 };
 
                 let branch = Self::evaluate(branch)?;
-                let value = branch.conclusion.value;
+                let value = branch.conclusion.value.clone();
 
                 Ok(Derivation::node(
                     Eval { term: term.clone(), value },

@@ -32,6 +32,20 @@ fn go(term: &Term, out: &mut Vec<Instr>) {
         Term::Integer(n) => out.push(Instr::Int(*n)),
         Term::Boolean(b) => out.push(Instr::Bool(*b)),
 
+        Term::Zero => out.push(Instr::Int(0)),
+        Term::Succ(t) => {
+            go(t, out);
+            out.push(Instr::Prim(Prim::Succ));
+        }
+        Term::Pred(t) => {
+            go(t, out);
+            out.push(Instr::Prim(Prim::Pred));
+        }
+        Term::IsZero(t) => {
+            go(t, out);
+            out.push(Instr::Prim(Prim::IsZero));
+        }
+        
         Term::Binary { op, lhs, rhs } => {
             go(lhs, out);
             go(rhs, out);
@@ -64,6 +78,9 @@ impl Compile for ArithCompiler {
     fn corresponds(machine: &MachineValue, source: &Value) -> bool {
         match (machine, source) {
             (MachineValue::Int(a), Value::Integer(b)) => a == b,
+            (MachineValue::Int(a), Value::Natural(b)) => {
+                *a >= 0 && *a as u64 == *b
+            }
             (MachineValue::Bool(a), Value::Boolean(b)) => a == b,
             _ => false,
         }

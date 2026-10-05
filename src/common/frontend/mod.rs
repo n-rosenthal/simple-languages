@@ -7,8 +7,10 @@
 //! Uma linguagem nova escreve só o que é dela:
 //!
 //! 1. uma enum `K` com os tipos de token e uma [`LexSpec`] (uma tabela);
-//! 2. as funções da gramática, sobre um [`TokenStream`] (e, para operadores
-//!    binários, [`parse_binary`] com uma tabela de precedência);
+//! 2. as funções da gramática, sobre um [`TokenStream`], com os combinadores
+//!    comuns: [`parse_binary`] (níveis de precedência, cada um com a sua
+//!    associatividade), [`parse_prefix`], [`left_chain`] (aplicação),
+//!    [`delimited`], [`delimited_list`], [`separated`] e [`many`];
 //! 3. `impl Lexer` (uma linha, chamando [`lex`]) e `impl Parser` (uma linha,
 //!    chamando [`parse_complete`]).
 //!
@@ -22,8 +24,11 @@ use std::fmt;
 
 use crate::common::{Lexer, Parser, Scanner};
 
-pub use lexer::{lex, LexError, LexSpec, Token, Words};
-pub use parser::{parse_binary, parse_complete, parse_integer, ParseError, TokenStream};
+pub use lexer::{ascii_word_continue, ascii_word_start, lex, LexError, LexSpec, Token, Words};
+pub use parser::{
+    delimited, delimited_list, left_chain, many, parse_binary, parse_complete, parse_integer,
+    parse_prefix, separated, Assoc, Level, ParseError, TokenStream,
+};
 
 /// O erro de qualquer fase do front-end.
 #[derive(Debug, Clone, PartialEq, Eq)]

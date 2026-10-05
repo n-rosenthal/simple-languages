@@ -21,47 +21,114 @@ use ArithTokenType as T;
 pub type TokenStream<'a> = crate::common::frontend::TokenStream<'a, ArithTokenType>;
 pub type ParseError = crate::common::frontend::ParseError<ArithTokenType>;
 
-const LEVELS: &[&[(ArithTokenType, BinaryOp)]] = &[
-    &[(T::Or, BinaryOp::Or)],
-    &[(T::And, BinaryOp::And)],
-    &[(T::Equal, BinaryOp::Equal)],
-    &[(T::LessThan, BinaryOp::LessThan)],
-    &[(T::Plus, BinaryOp::Add), (T::Minus, BinaryOp::Sub)],
-    &[(T::Slash, BinaryOp::Div), (T::Percent, BinaryOp::Mod)],
-    &[(T::Star, BinaryOp::Mul)],
-];
-
 pub struct ArithParser;
 
 impl ArithParser {
+    fn levels() -> Vec<crate::common::frontend::Level<ArithTokenType, BinaryOp>> {
+        use crate::common::frontend::Level;
+
+        vec![
+            Level::left(&[
+                (T::Or, BinaryOp::Or),
+            ]),
+            Level::left(&[
+                (T::And, BinaryOp::And),
+            ]),
+            Level::left(&[
+                (T::Equal, BinaryOp::Equal),
+            ]),
+            Level::left(&[
+                (T::LessThan, BinaryOp::LessThan),
+            ]),
+            Level::left(&[
+                (T::Plus, BinaryOp::Add),
+                (T::Minus, BinaryOp::Sub),
+            ]),
+            Level::left(&[
+                (T::Star, BinaryOp::Mul),
+                (T::Slash, BinaryOp::Div),
+                (T::Percent, BinaryOp::Mod),
+            ]),
+        ]
+    }
+
     pub fn new() -> Self {
         Self
     }
 
     /// term ::= "if" term "then" term "else" term | binary(0)
     fn parse_term(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
-        if stream.peek_kind() != Some(T::If) {
-            return parse_binary(stream, LEVELS, &Self::parse_primary, &Term::binary);
+        if stream.peek_kind() == Some(T::If) {
+            stream.next();
+
+            let condition = Self::parse_term(stream)?;
+
+            stream.expect(T::Then)?;
+
+            let then_branch = Self::parse_term(stream)?;
+
+            stream.expect(T::Else)?;
+
+            let else_branch = Self::parse_term(stream)?;
+
+            return Ok(Term::if_then_else(
+                condition,
+                then_branch,
+                else_branch,
+            ));
         }
 
-        stream.next();
-        let condition = Self::parse_term(stream)?;
-        stream.expect(T::Then)?;
-        let then_branch = Self::parse_term(stream)?;
-        stream.expect(T::Else)?;
-        let else_branch = Self::parse_term(stream)?;
+        let levels = Self::levels();
 
-        Ok(Term::if_then_else(condition, then_branch, else_branch))
+        parse_binary(
+            stream,
+            &levels,
+            &Self::parse_unary,
+            &Term::binary,
+        )
     }
 
-    /// primary ::= INTEGER | BOOLEAN | "(" term ")"
+    /// unary ::= "succ" unary
+    ///         | "pred" unary
+    ///         | "iszero" unary
+    ///         | primary
+    fn parse_unary(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
+        match stream.peek_kind() {
+            Some(T::Succ) => {
+                stream.next();
+                Ok(Term::succ(Self::parse_unary(stream)?))
+            }
+
+            Some(T::Pred) => {
+                stream.next();
+                Ok(Term::pred(Self::parse_unary(stream)?))
+            }
+
+            Some(T::IsZero) => {
+                stream.next();
+                Ok(Term::is_zero(Self::parse_unary(stream)?))
+            }
+
+            _ => Self::parse_primary(stream),
+        }
+    }
+
+    /// primary ::= INTEGER | BOOLEAN | 0 | "(" term ")"
     fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
         let token = stream.advance()?;
 
         match token.kind {
-            T::Integer => parse_integer(&token).map(Term::integer),
+            T::Integer => {
+                parse_integer(&token).map(Term::integer)
+            }
 
-            T::Boolean => Ok(Term::boolean(token.lexeme == "true")),
+            T::Boolean => {
+                Ok(Term::boolean(token.lexeme == "true"))
+            }
+
+            T::Zero => {
+                Ok(Term::zero())
+            }
 
             T::LeftParen => {
                 let term = Self::parse_term(stream)?;

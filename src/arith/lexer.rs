@@ -34,7 +34,7 @@ const SPEC: LexSpec<ArithTokenType> = LexSpec {
     ],
     integer: Some(T::Integer),
     words: Words::Reject("arith has no variables"),
-    line_comment: None,
+    ..LexSpec::EMPTY
 };
 
 pub struct ArithLexer;

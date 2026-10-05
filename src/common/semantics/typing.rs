@@ -12,6 +12,7 @@ use std::convert::Infallible;
 use std::fmt;
 use std::marker::PhantomData;
 
+use crate::common::context::Context;
 use crate::common::ToLatex;
 
 use super::derivation::{Derivation, Typed};
@@ -34,6 +35,17 @@ pub trait Typing {
     /// Linguagens com contexto mantêm um `check_in` próprio, que estende Γ,
     /// e chamam-no a partir daqui com Γ vazio.
     fn check(term: &Self::Term) -> Result<TypingDerivation<Self>, Self::Error>;
+
+    fn check_in(
+        _context: &Context<Self::Type>,
+        term: &Self::Term,
+    ) -> Result<TypingDerivation<Self>, Self::Error> {
+        let derivation = Self::check(term)?;
+        if !derivation.conclusion.context.is_empty() {
+            panic!("check_in: derivation has non-empty context");
+        }
+        Ok(derivation)
+    }
 
     /// Só o tipo, descartando a derivação.
     fn type_of(term: &Self::Term) -> Result<Self::Type, Self::Error> {

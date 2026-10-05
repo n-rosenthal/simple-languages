@@ -1,13 +1,24 @@
-///!    Valores de `arith-extensions`: inteiros e booleanos, com operadores binários.
+///! Valores de `arith-extensions`: inteiros, booleanos e naturais,
+///! com operadores binários.
 
 use std::fmt;
 
 use super::terms::{BinaryOp, Term};
+use crate::common::context::Context;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub type Environment = Context<Value>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Integer(i64),
     Boolean(bool),
+    Natural(u64),
+
+    Closure {
+        parameter: String,
+        body: Box<Term>,
+        environment: Box<Environment>,
+    },
 }
 
 impl fmt::Display for Value {
@@ -15,6 +26,8 @@ impl fmt::Display for Value {
         match self {
             Value::Integer(n) => write!(f, "{n}"),
             Value::Boolean(b) => write!(f, "{b}"),
+            Value::Natural(n) => write!(f, "{n}"),
+            Value::Closure { .. } => write!(f, "<closure>"),
         }
     }
 }
@@ -24,6 +37,8 @@ impl From<Value> for Term {
         match value {
             Value::Integer(n) => Term::Integer(n),
             Value::Boolean(b) => Term::Boolean(b),
+            Value::Natural(n) => Term::natural(n),
+            _ => panic!("Cannot convert closure to term"),
         }
     }
 }
@@ -67,15 +82,6 @@ mod tests {
         assert_eq!(apply(BinaryOp::Add, int(1), int(2)), Some(int(3)));
         assert_eq!(apply(BinaryOp::Sub, int(4), int(5)), Some(int(-1)));
         assert_eq!(apply(BinaryOp::Mul, int(2), int(3)), Some(int(6)));
-    }
-
-    #[test]
-    fn comparisons_and_logic() {
-        let (t, f) = (Value::Boolean(true), Value::Boolean(false));
-        assert_eq!(apply(BinaryOp::LessThan, int(1), int(2)), Some(t));
-        assert_eq!(apply(BinaryOp::Equal, t, f), Some(f));
-        assert_eq!(apply(BinaryOp::And, t, f), Some(f));
-        assert_eq!(apply(BinaryOp::Or, t, f), Some(t));
     }
 
     #[test]

@@ -41,6 +41,38 @@ impl<'a, K: Copy + Eq> TokenStream<'a, K> {
         token
     }
 
+    /// O próximo token é do tipo `kind`?
+    pub fn at(&self, kind: K) -> bool {
+        self.peek_kind() == Some(kind)
+    }
+
+    /// O próximo token é de algum dos tipos?
+    pub fn at_any(&self, kinds: &[K]) -> bool {
+        self.peek_kind().is_some_and(|kind| kinds.contains(&kind))
+    }
+
+    /// Consome o próximo token se for do tipo `kind`.
+    pub fn eat(&mut self, kind: K) -> Option<&'a Token<K>> {
+        if self.at(kind) {
+            self.next()
+        } else {
+            None
+        }
+    }
+
+    /// O erro para o token atual, que não serve ao que o parser esperava (ou
+    /// `UnexpectedEnd`, se a entrada acabou). Não consome nada.
+    pub fn unexpected(&self) -> ParseError<K> {
+        match self.peek() {
+            Some(token) => ParseError::UnexpectedToken {
+                expected: None,
+                found: token.kind,
+                span: token.span,
+            },
+            None => ParseError::UnexpectedEnd { expected: None },
+        }
+    }
+
     pub fn is_at_end(&self) -> bool {
         self.position >= self.tokens.len()
     }
@@ -152,14 +184,60 @@ pub fn parse_integer<K>(token: &Token<K>) -> Result<i64, ParseError<K>> {
     })
 }
 
-/// Uma tabela de precedência para operadores binários associativos à
-/// esquerda: do nível mais fraco (índice 0) ao mais forte.
+// =============================================================================
+// Operadores binários
+// =============================================================================
+
+/// Como operadores do mesmo nível se agrupam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Assoc {
+    /// `a - b - c` é `(a - b) - c`.
+    Left,
+    /// `a -> b -> c` é `a -> (b -> c)`.
+    Right,
+    /// `a < b < c` é um erro.
+    Non,
+}
+
+/// Um nível de precedência: operadores que se agrupam do mesmo modo.
+#[derive(Debug, Clone, Copy)]
+pub struct Level<K: 'static, O: 'static> {
+    pub operators: &'static [(K, O)],
+    pub assoc: Assoc,
+}
+
+impl<K, O> Level<K, O> {
+    pub const fn left(operators: &'static [(K, O)]) -> Self {
+        Self { operators, assoc: Assoc::Left }
+    }
+
+    pub const fn right(operators: &'static [(K, O)]) -> Self {
+        Self { operators, assoc: Assoc::Right }
+    }
+
+    pub const fn non(operators: &'static [(K, O)]) -> Self {
+        Self { operators, assoc: Assoc::Non }
+    }
+}
+
+fn operator_at<K: Copy + Eq, O: Copy>(stream: &TokenStream<'_, K>, level: &Level<K, O>) -> Option<O> {
+    let kind = stream.peek_kind()?;
+    level
+        .operators
+        .iter()
+        .find(|(token, _)| *token == kind)
+        .map(|(_, op)| *op)
+}
+
+/// Operadores binários por níveis de precedência, do mais fraco (índice 0) ao
+/// mais forte, cada nível com a sua associatividade.
 ///
 /// ```ignore
-/// const LEVELS: &[&[(Kind, Op)]] = &[
-///     &[(Kind::Or, Op::Or)],
-///     &[(Kind::Plus, Op::Add), (Kind::Minus, Op::Sub)],
-///     &[(Kind::Star, Op::Mul)],
+/// const LEVELS: &[Level<Kind, Op>] = &[
+///     Level::left(&[(Kind::Or, Op::Or)]),
+///     Level::non(&[(Kind::Lt, Op::Lt)]),
+///     Level::left(&[(Kind::Plus, Op::Add), (Kind::Minus, Op::Sub)]),
+///     Level::right(&[(Kind::Cons, Op::Cons)]),
 /// ];
 /// parse_binary(stream, LEVELS, &Self::parse_primary, &Term::binary)
 /// ```
@@ -168,7 +246,7 @@ pub fn parse_integer<K>(token: &Token<K>) -> Result<i64, ParseError<K>> {
 /// `combine` monta o nó de um operador.
 pub fn parse_binary<K, O, T>(
     stream: &mut TokenStream<'_, K>,
-    levels: &[&[(K, O)]],
+    levels: &[Level<K, O>],
     operand: &dyn Fn(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
     combine: &dyn Fn(O, T, T) -> T,
 ) -> Result<T, ParseError<K>>
@@ -181,8 +259,8 @@ where
 
 fn climb<K, O, T>(
     stream: &mut TokenStream<'_, K>,
-    levels: &[&[(K, O)]],
-    level: usize,
+    levels: &[Level<K, O>],
+    index: usize,
     operand: &dyn Fn(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
     combine: &dyn Fn(O, T, T) -> T,
 ) -> Result<T, ParseError<K>>
@@ -190,22 +268,165 @@ where
     K: Copy + Eq,
     O: Copy,
 {
-    let Some(operators) = levels.get(level) else {
+    let Some(level) = levels.get(index) else {
         return operand(stream);
     };
 
-    let mut lhs = climb(stream, levels, level + 1, operand, combine)?;
+    let mut lhs = climb(stream, levels, index + 1, operand, combine)?;
 
+    match level.assoc {
+        Assoc::Left => {
+            while let Some(op) = operator_at(stream, level) {
+                stream.next();
+                let rhs = climb(stream, levels, index + 1, operand, combine)?;
+                lhs = combine(op, lhs, rhs);
+            }
+            Ok(lhs)
+        }
+
+        Assoc::Right => match operator_at(stream, level) {
+            Some(op) => {
+                stream.next();
+                // o lado direito é do mesmo nível: `a -> (b -> c)`
+                let rhs = climb(stream, levels, index, operand, combine)?;
+                Ok(combine(op, lhs, rhs))
+            }
+            None => Ok(lhs),
+        },
+
+        Assoc::Non => match operator_at(stream, level) {
+            Some(op) => {
+                stream.next();
+                let rhs = climb(stream, levels, index + 1, operand, combine)?;
+                if operator_at(stream, level).is_some() {
+                    return Err(stream.unexpected()); // `a < b < c`
+                }
+                Ok(combine(op, lhs, rhs))
+            }
+            None => Ok(lhs),
+        },
+    }
+}
+
+/// Operadores prefixos: `prefix* operando`, aplicados de dentro para fora
+/// (`succ succ 0` é `succ (succ 0)`).
+pub fn parse_prefix<K, O, T>(
+    stream: &mut TokenStream<'_, K>,
+    prefixes: &[(K, O)],
+    operand: &dyn Fn(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+    apply: &dyn Fn(O, T) -> T,
+) -> Result<T, ParseError<K>>
+where
+    K: Copy + Eq,
+    O: Copy,
+{
+    let mut operators = Vec::new();
     while let Some(op) = stream.peek_kind().and_then(|kind| {
-        operators
+        prefixes
             .iter()
             .find(|(token, _)| *token == kind)
             .map(|(_, op)| *op)
     }) {
         stream.next();
-        let rhs = climb(stream, levels, level + 1, operand, combine)?;
-        lhs = combine(op, lhs, rhs);
+        operators.push(op);
     }
 
+    let mut value = operand(stream)?;
+    for op in operators.into_iter().rev() {
+        value = apply(op, value);
+    }
+    Ok(value)
+}
+
+// =============================================================================
+// Combinadores
+// =============================================================================
+
+/// `open inner close`: um grupo entre delimitadores, como `( termo )`.
+pub fn delimited<K, T>(
+    stream: &mut TokenStream<'_, K>,
+    open: K,
+    close: K,
+    inner: impl FnOnce(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+) -> Result<T, ParseError<K>>
+where
+    K: Copy + Eq,
+{
+    stream.expect(open)?;
+    let value = inner(stream)?;
+    stream.expect(close)?;
+    Ok(value)
+}
+
+/// `item (separator item)*`: pelo menos um item.
+pub fn separated<K, T>(
+    stream: &mut TokenStream<'_, K>,
+    separator: K,
+    mut item: impl FnMut(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+) -> Result<Vec<T>, ParseError<K>>
+where
+    K: Copy + Eq,
+{
+    let mut items = vec![item(stream)?];
+    while stream.eat(separator).is_some() {
+        items.push(item(stream)?);
+    }
+    Ok(items)
+}
+
+/// `open (item (separator item)*)? close`: uma lista, possivelmente vazia,
+/// como `{a, b}` ou `()`.
+pub fn delimited_list<K, T>(
+    stream: &mut TokenStream<'_, K>,
+    open: K,
+    close: K,
+    separator: K,
+    item: impl FnMut(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+) -> Result<Vec<T>, ParseError<K>>
+where
+    K: Copy + Eq,
+{
+    stream.expect(open)?;
+    if stream.eat(close).is_some() {
+        return Ok(Vec::new());
+    }
+
+    let items = separated(stream, separator, item)?;
+    stream.expect(close)?;
+    Ok(items)
+}
+
+/// `item*`: itens enquanto o próximo token for de algum dos tipos `starts`.
+pub fn many<K, T>(
+    stream: &mut TokenStream<'_, K>,
+    starts: &[K],
+    mut item: impl FnMut(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+) -> Result<Vec<T>, ParseError<K>>
+where
+    K: Copy + Eq,
+{
+    let mut items = Vec::new();
+    while stream.at_any(starts) {
+        items.push(item(stream)?);
+    }
+    Ok(items)
+}
+
+/// `operando operando*`, associado à esquerda: a aplicação `f x y` é
+/// `(f x) y`. Continua enquanto o próximo token começar um operando (`starts`).
+pub fn left_chain<K, T>(
+    stream: &mut TokenStream<'_, K>,
+    starts: &[K],
+    operand: &dyn Fn(&mut TokenStream<'_, K>) -> Result<T, ParseError<K>>,
+    combine: &dyn Fn(T, T) -> T,
+) -> Result<T, ParseError<K>>
+where
+    K: Copy + Eq,
+{
+    let mut lhs = operand(stream)?;
+    while stream.at_any(starts) {
+        let rhs = operand(stream)?;
+        lhs = combine(lhs, rhs);
+    }
     Ok(lhs)
 }

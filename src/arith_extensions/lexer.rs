@@ -3,8 +3,13 @@
 //! Tokens: inteiros, `true`/`false`, `if`/`then`/`else`, `+ - * <`, `==`,
 //! `&&`, `||`, `/`, `%` e parênteses. Qualquer outra palavra é um erro: `arith-extensions` não tem
 //! variáveis.
-
-use crate::common::frontend::{lex, LexSpec, Words};
+use crate::common::frontend::{
+    ascii_word_continue,
+    ascii_word_start,
+    LexSpec,
+    Words,
+    lex
+};
 use crate::common::{Lexer, SourceLine};
 
 use super::token::{ArithToken, ArithTokenType};
@@ -20,7 +25,11 @@ const SPEC: LexSpec<ArithTokenType> = LexSpec {
         ("if", T::If),
         ("then", T::Then),
         ("else", T::Else),
+        ("succ", T::Succ),
+        ("pred", T::Pred),
+        ("iszero", T::IsZero),
     ],
+
     symbols: &[
         ("+", T::Plus),
         ("-", T::Minus),
@@ -34,9 +43,17 @@ const SPEC: LexSpec<ArithTokenType> = LexSpec {
         ("(", T::LeftParen),
         (")", T::RightParen),
     ],
+
     integer: Some(T::Integer),
-    words: Words::Reject("arith has no variables"),
+    zero: Some(T::Zero),
+
+    words: Words::Reject("arith-extensions has no variables"),
+
     line_comment: None,
+    block_comment: None,
+
+    word_start: ascii_word_start,
+    word_continue: ascii_word_continue,
 };
 
 pub struct ArithLexer;

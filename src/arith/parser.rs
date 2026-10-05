@@ -10,7 +10,7 @@
 //! `||`, `&&`, `==`, `<`, `+ -`, `*`. Um `if` como operando precisa de
 //! parênteses.
 
-use crate::common::frontend::{parse_binary, parse_complete, parse_integer};
+use crate::common::frontend::{delimited, parse_binary, parse_complete, parse_integer, Level};
 use crate::common::Parser;
 
 use super::terms::{BinaryOp, Term};
@@ -21,13 +21,13 @@ use ArithTokenType as T;
 pub type TokenStream<'a> = crate::common::frontend::TokenStream<'a, ArithTokenType>;
 pub type ParseError = crate::common::frontend::ParseError<ArithTokenType>;
 
-const LEVELS: &[&[(ArithTokenType, BinaryOp)]] = &[
-    &[(T::Or, BinaryOp::Or)],
-    &[(T::And, BinaryOp::And)],
-    &[(T::Equal, BinaryOp::Equal)],
-    &[(T::LessThan, BinaryOp::LessThan)],
-    &[(T::Plus, BinaryOp::Add), (T::Minus, BinaryOp::Sub)],
-    &[(T::Star, BinaryOp::Mul)],
+const LEVELS: &[Level<ArithTokenType, BinaryOp>] = &[
+    Level::left(&[(T::Or, BinaryOp::Or)]),
+    Level::left(&[(T::And, BinaryOp::And)]),
+    Level::left(&[(T::Equal, BinaryOp::Equal)]),
+    Level::left(&[(T::LessThan, BinaryOp::LessThan)]),
+    Level::left(&[(T::Plus, BinaryOp::Add), (T::Minus, BinaryOp::Sub)]),
+    Level::left(&[(T::Star, BinaryOp::Mul)]),
 ];
 
 pub struct ArithParser;
@@ -55,24 +55,11 @@ impl ArithParser {
 
     /// primary ::= INTEGER | BOOLEAN | "(" term ")"
     fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Term, ParseError> {
-        let token = stream.advance()?;
-
-        match token.kind {
-            T::Integer => parse_integer(&token).map(Term::integer),
-
-            T::Boolean => Ok(Term::boolean(token.lexeme == "true")),
-
-            T::LeftParen => {
-                let term = Self::parse_term(stream)?;
-                stream.expect(T::RightParen)?;
-                Ok(term)
-            }
-
-            found => Err(ParseError::UnexpectedToken {
-                expected: None,
-                found,
-                span: token.span,
-            }),
+        match stream.peek_kind() {
+            Some(T::Integer) => parse_integer(&stream.advance()?).map(Term::integer),
+            Some(T::Boolean) => Ok(Term::boolean(stream.advance()?.lexeme == "true")),
+            Some(T::LeftParen) => delimited(stream, T::LeftParen, T::RightParen, Self::parse_term),
+            _ => Err(stream.unexpected()),
         }
     }
 

@@ -22,6 +22,14 @@ pub type SyntaxError = FrontendError<ScanError, LexError, ParseError>;
 pub struct ArithExtensions;
 
 const EXAMPLES: &[Example] = &[
+    // extensions
+    // Peano arithmetic for natural numbers
+    Example { title: "Zero", source: "0" },
+    Example { title: "Sucessor", source: "succ 0" },
+    Example { title: "Predecessor", source: "pred (succ 0)" },
+    Example { title: "IsZero", source: "iszero (pred (succ 0))" },
+    
+    // Integers
     Example { title: "Soma e produto", source: "(2 * 3) + (4 - 5)" },
     Example { title: "Condicional", source: "if 1 < 2 then 10 else 20" },
     Example { title: "Igualdade de booleanos", source: "true == (1 < 2)" },
@@ -56,7 +64,7 @@ const SYNTAX: &[Syntax] = &[
 impl Language for ArithExtensions {
     const NAME: &'static str = "arith-extensions";
     const DESCRIPTION: &'static str =
-        "integers, booleans, + - * < == && ||, if/then/else (TAPL chs. 3 and 8)";
+        "peano naturals, integers, booleans, + - * < == && || div mod, if/then/else (TAPL chs. 3 and 8)";
     
     type Term = Term;
     type Type = Type;

@@ -35,6 +35,43 @@ crate::rules! {
         IfFalse => "E-IfFalse" {
             [] => r"\mathsf{if}\ \mathsf{false}\ \mathsf{then}\ t_2\ \mathsf{else}\ t_3 \to t_3"
         },
+
+        //  Peano arithmetic
+        /// t → t'  ⟹  succ(t) → succ(t')
+        SuccCongruence => "E-Succ" {
+            [r"t \to t'"] => r"\mathsf{succ}(t) \to \mathsf{succ}(t')"
+        },
+
+        /// t → t'  ⟹  pred(t) → pred(t')
+        PredCongruence => "E-Pred" {
+            [r"t \to t'"] => r"\mathsf{pred}(t) \to \mathsf{pred}(t')"
+        },
+
+        /// t → t'  ⟹  iszero(t) → iszero(t')
+        IsZeroCongruence => "E-IsZero" {
+            [r"t \to t'"] => r"\mathsf{iszero}(t) \to \mathsf{iszero}(t')"
+        },
+
+        /// pred(0) → 0
+        PredZero => "E-PredZero" {
+            [] => r"\mathsf{pred}(0) \to 0"
+        },
+
+        /// pred(succ(nv)) → nv
+        PredSucc => "E-PredSucc" {
+            [] => r"\mathsf{pred}(\mathsf{succ}(nv)) \to nv"
+        },
+
+        /// iszero(0) → true
+        IsZeroZero => "E-IsZeroZero" {
+            [] => r"\mathsf{iszero}(0) \to \mathsf{true}"
+        },
+
+        /// iszero(succ(nv)) → false
+        IsZeroSucc => "E-IsZeroSucc" {
+            [] => r"\mathsf{iszero}(\mathsf{succ}(nv)) \to \mathsf{false}"
+        },
+
     }
 }
 
@@ -44,6 +81,21 @@ fn value_of(term: &Term) -> Option<Value> {
     match term {
         Term::Integer(n) => Some(Value::Integer(*n)),
         Term::Boolean(b) => Some(Value::Boolean(*b)),
+
+        Term::Zero => Some(Value::Natural(0)),
+
+        Term::Succ(n) => {
+            let inner = value_of(n)?;
+
+            match inner {
+                Value::Natural(k) => Some(Value::Natural(k + 1)),
+                _ => None,
+            }
+        }
+
+        // pred e iszero são operadores, não valores.
+        Term::Pred(_) | Term::IsZero(_) => None,
+
         _ => None,
     }
 }
@@ -56,44 +108,175 @@ impl ArithSmallStep {
     /// cadeia `1 + 1 + ... + 1`.
     fn reduce(term: &Term) -> Option<(SmallStepRule, Term)> {
         match term {
-            Term::Integer(_) | Term::Boolean(_) => None,
+            // Valores
+            Term::Integer(_)
+            | Term::Boolean(_)
+            | Term::Zero => None,
 
-            Term::Binary { op, lhs, rhs } => {
-                // E-Bin1: reduz o lado esquerdo primeiro. Se ele trava, o termo trava.
-                if !lhs.is_value() {
-                    let (_, inner) = Self::reduce(lhs)?;
-                    let next = Term::binary(*op, inner, (**rhs).clone());
-                    return Some((SmallStepRule::BinaryLeft, next));
+            // E-Succ:
+            //
+            // t → t'
+            // ----------------
+            // succ t → succ t'
+            //
+            // `succ nv` é um valor; portanto, só precisamos reduzir
+            // seu argumento quando ele ainda não é valor.
+            Term::Succ(inner) => {
+                if inner.is_value() {
+                    None
+                } else {
+                    let (_, next_inner) = Self::reduce(inner)?;
+                    Some((
+                        SmallStepRule::SuccCongruence,
+                        Term::succ(next_inner),
+                    ))
                 }
-
-                // E-Bin2: a esquerda já é valor, reduz a direita
-                if !rhs.is_value() {
-                    let (_, inner) = Self::reduce(rhs)?;
-                    let next = Term::binary(*op, (**lhs).clone(), inner);
-                    return Some((SmallStepRule::BinaryRight, next));
-                }
-
-                // E-BinConst: ambos são valores. Operandos incompatíveis não
-                // têm regra: o termo trava.
-                let result = apply(*op, value_of(lhs)?, value_of(rhs)?)?;
-                Some((SmallStepRule::BinaryCompute, result.into()))
             }
 
-            Term::If { condition, then_branch, else_branch } => match **condition {
-                // E-IfTrue / E-IfFalse
-                Term::Boolean(true) => Some((SmallStepRule::IfTrue, (**then_branch).clone())),
-                Term::Boolean(false) => Some((SmallStepRule::IfFalse, (**else_branch).clone())),
-                // `1` como condição: travado
+            // pred 0 → 0
+            //
+            // pred (succ nv) → nv
+            //
+            // Caso o argumento ainda não seja valor, primeiro reduzimos
+            // esse argumento.
+            Term::Pred(inner) => {
+                if !inner.is_value() {
+                    let (_, next_inner) = Self::reduce(inner)?;
+
+                    return Some((
+                        SmallStepRule::PredCongruence,
+                        Term::pred(next_inner),
+                    ));
+                }
+
+                match inner.as_ref() {
+                    Term::Zero => Some((
+                        SmallStepRule::PredZero,
+                        Term::zero(),
+                    )),
+
+                    Term::Succ(nv) if nv.is_value() => Some((
+                        SmallStepRule::PredSucc,
+                        (**nv).clone(),
+                    )),
+
+                    // Um pred de algo que não é um natural valor trava.
+                    _ => None,
+                }
+            }
+
+            // iszero 0 → true
+            //
+            // iszero (succ nv) → false
+            //
+            // Caso o argumento ainda não seja valor, reduzimos primeiro.
+            Term::IsZero(inner) => {
+                if !inner.is_value() {
+                    let (_, next_inner) = Self::reduce(inner)?;
+
+                    return Some((
+                        SmallStepRule::IsZeroCongruence,
+                        Term::is_zero(next_inner),
+                    ));
+                }
+
+                match inner.as_ref() {
+                    Term::Zero => Some((
+                        SmallStepRule::IsZeroZero,
+                        Term::boolean(true),
+                    )),
+
+                    Term::Succ(nv) if nv.is_value() => Some((
+                        SmallStepRule::IsZeroSucc,
+                        Term::boolean(false),
+                    )),
+
+                    // iszero de algo que não é um natural valor trava.
+                    _ => None,
+                }
+            }
+
+            Term::Binary { op, lhs, rhs } => {
+                // E-Bin1: reduz o lado esquerdo primeiro.
+                if !lhs.is_value() {
+                    let (_, inner) = Self::reduce(lhs)?;
+                    let next = Term::binary(
+                        *op,
+                        inner,
+                        (**rhs).clone(),
+                    );
+
+                    return Some((
+                        SmallStepRule::BinaryLeft,
+                        next,
+                    ));
+                }
+
+                // E-Bin2: esquerda é valor; reduz a direita.
+                if !rhs.is_value() {
+                    let (_, inner) = Self::reduce(rhs)?;
+                    let next = Term::binary(
+                        *op,
+                        (**lhs).clone(),
+                        inner,
+                    );
+
+                    return Some((
+                        SmallStepRule::BinaryRight,
+                        next,
+                    ));
+                }
+
+                // E-BinConst: ambos são valores.
+                //
+                // Se os operandos forem incompatíveis, não existe regra:
+                // o termo fica travado.
+                let result = apply(
+                    *op,
+                    value_of(lhs)?,
+                    value_of(rhs)?,
+                )?;
+
+                Some((
+                    SmallStepRule::BinaryCompute,
+                    result.into(),
+                ))
+            }
+
+            Term::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => match condition.as_ref() {
+                // E-IfTrue
+                Term::Boolean(true) => Some((
+                    SmallStepRule::IfTrue,
+                    (**then_branch).clone(),
+                )),
+
+                // E-IfFalse
+                Term::Boolean(false) => Some((
+                    SmallStepRule::IfFalse,
+                    (**else_branch).clone(),
+                )),
+
+                // Uma condição inteira não é booleana e trava.
                 Term::Integer(_) => None,
-                // E-If: reduz a condição
+
+                // E-If
                 _ => {
                     let (_, inner) = Self::reduce(condition)?;
+
                     let next = Term::if_then_else(
                         inner,
                         (**then_branch).clone(),
                         (**else_branch).clone(),
                     );
-                    Some((SmallStepRule::IfCongruence, next))
+
+                    Some((
+                        SmallStepRule::IfCongruence,
+                        next,
+                    ))
                 }
             },
         }
@@ -120,9 +303,18 @@ mod tests {
     use crate::arith_extensions::terms::BinaryOp;
     use crate::common::semantics::run;
 
+    fn nat(n: u64) -> Term {
+        Term::natural(n)
+    }
+
     fn int(n: i64) -> Term {
         Term::integer(n)
     }
+
+    fn bool(b: bool) -> Term {
+        Term::boolean(b)
+    }
+
 
     fn add(l: Term, r: Term) -> Term {
         Term::binary(BinaryOp::Add, l, r)
@@ -224,5 +416,80 @@ mod tests {
 
         assert!(trace.is_final());
         assert_eq!(trace.final_state, int(i64::MIN));
+    }
+
+    #[test]
+    fn pred_zero_reduces_to_zero() {
+        let term = Term::pred(Term::zero());
+
+        let step = ArithSmallStep::step(&term).unwrap();
+
+        assert_eq!(step.rule, SmallStepRule::PredZero);
+        assert_eq!(step.to, Term::zero());
+    }
+
+    #[test]
+    fn pred_succ_reduces_to_inner_natural() {
+        let term = Term::pred(Term::succ(nat(3)));
+
+        let step = ArithSmallStep::step(&term).unwrap();
+
+        assert_eq!(step.rule, SmallStepRule::PredSucc);
+        assert_eq!(step.to, nat(3));
+    }
+
+    #[test]
+    fn pred_reduces_argument_first() {
+        let term = Term::pred(Term::succ(Term::pred(Term::zero())));
+
+        let trace = run::<ArithSmallStep>(term);
+
+        assert!(trace.is_final());
+        assert_eq!(trace.final_state, Term::zero());
+
+        assert_eq!(
+            trace.rules(),
+            vec![
+                SmallStepRule::PredCongruence,
+                SmallStepRule::PredSucc,
+            ]
+        );
+    }
+
+    #[test]
+    fn iszero_zero_reduces_to_true() {
+        let term = Term::is_zero(Term::zero());
+
+        let step = ArithSmallStep::step(&term).unwrap();
+
+        assert_eq!(step.rule, SmallStepRule::IsZeroZero);
+        assert_eq!(step.to, Term::boolean(true));
+    }
+
+    #[test]
+    fn iszero_succ_reduces_to_false() {
+        let term = Term::is_zero(Term::succ(nat(3)));
+
+        let step = ArithSmallStep::step(&term).unwrap();
+
+        assert_eq!(step.rule, SmallStepRule::IsZeroSucc);
+        assert_eq!(step.to, Term::boolean(false));
+    }
+
+    #[test]
+    fn succ_reduces_argument_first() {
+        let term = Term::succ(Term::pred(Term::zero()));
+
+        let trace = run::<ArithSmallStep>(term);
+
+        assert!(trace.is_final());
+        assert_eq!(trace.final_state, Term::succ(Term::zero()));
+
+        assert_eq!(
+            trace.rules(),
+            vec![
+                SmallStepRule::SuccCongruence,
+            ]
+        );
     }
 }
