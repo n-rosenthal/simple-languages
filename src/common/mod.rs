@@ -11,6 +11,7 @@ pub mod language;
 pub mod driver;
 pub mod interpreter;
 pub mod document;
+pub mod ast;
 
 pub use context::Context;
 pub use document::Block;

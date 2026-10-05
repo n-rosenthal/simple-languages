@@ -12,6 +12,7 @@ pub mod big_step;
 pub mod compile;
 pub mod language;
 mod latex_impls;
+pub mod ast;
 
 /// O scanner de `arith` é o compartilhado.
 pub use crate::common::source::{LineScanner as ArithScanner, ScanError};
