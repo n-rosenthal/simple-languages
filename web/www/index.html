@@ -33,8 +33,9 @@
 
       <form id="form" autocomplete="off">
         <span class="prompt" id="prompt" aria-hidden="true">❯</span>
-        <input id="line" type="text" spellcheck="false" autocapitalize="off"
-               autocorrect="off" aria-label="Termo ou comando" autofocus>
+        <textarea id="line" rows="1" spellcheck="false" autocapitalize="off"
+                  autocorrect="off" aria-label="Termo, programa ou comando"
+                  placeholder="Enter executa · Shift+Enter nova linha · ;; separa instruções" autofocus></textarea>
         <button id="insert-lambda" type="button" title="Inserir λ (ou digite \)">λ</button>
         <button type="submit">Executar</button>
       </form>
@@ -52,7 +53,8 @@
       </div>
 
       <p class="hint">
-        <kbd>↑</kbd> <kbd>↓</kbd> histórico · <kbd>:help</kbd> comandos ·
+        <kbd>↑</kbd> <kbd>↓</kbd> histórico · <kbd>Shift</kbd>+<kbd>Enter</kbd> nova linha ·
+        <kbd>;;</kbd> separa instruções · <kbd>:help</kbd> comandos ·
         <kbd>:small</kbd> <kbd>:type</kbd> <kbd>:big</kbd> <kbd>:machine</kbd> trocam o modo
       </p>
     </aside>

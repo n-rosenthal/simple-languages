@@ -21,7 +21,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::common::semantics::{BigStep, Machine, Step, Transition};
+use crate::common::semantics::{BigStep, Machine, NotDefined, Step, Transition};
 use crate::common::store::{Location, Store};
 
 // =============================================================================
@@ -45,15 +45,6 @@ pub enum Prim {
     Eq,
     And,
     Or,
-
-    //  extensions
-    Div,
-    Mod,
-
-    //  peano arithmetic
-    Succ,
-    Pred,
-    IsZero,
 }
 
 impl Prim {
@@ -66,111 +57,27 @@ impl Prim {
             Prim::Eq => "eq",
             Prim::And => "and",
             Prim::Or => "or",
-
-            Prim::Div => "div",
-            Prim::Mod => "mod",
-
-            Prim::Succ => "succ",
-            Prim::Pred => "pred",
-            Prim::IsZero => "iszero",
         }
     }
 
-    /// Número de operandos consumidos pelo operador.
-    fn arity(self) -> usize {
-        match self {
-            Prim::Succ | Prim::Pred | Prim::IsZero => 1,
-            Prim::Add
-            | Prim::Sub
-            | Prim::Mul
-            | Prim::Lt
-            | Prim::Eq
-            | Prim::And
-            | Prim::Or
-            | Prim::Div
-            | Prim::Mod => 2,
-        }
-    }
-
-    /// Aplica um operador binário.
-    ///
-    /// `None` quando os operandos não servem ao operador.
-    fn apply_binary(self, lhs: Value, rhs: Value) -> Option<Value> {
+    /// `None` quando os operandos não servem ao operador (o estado trava).
+    /// A aritmética dá a volta em 64 bits, como em `arith`: o livro usa
+    /// inteiros sem limite, e estouro travar quebraria o teorema de
+    /// progresso.
+    fn apply(self, lhs: Value, rhs: Value) -> Option<Value> {
         match (self, lhs, rhs) {
-            (Prim::Add, Value::Int(a), Value::Int(b)) => {
-                Some(Value::Int(a.wrapping_add(b)))
-            }
-
-            (Prim::Sub, Value::Int(a), Value::Int(b)) => {
-                Some(Value::Int(a.wrapping_sub(b)))
-            }
-
-            (Prim::Mul, Value::Int(a), Value::Int(b)) => {
-                Some(Value::Int(a.wrapping_mul(b)))
-            }
-
-            (Prim::Lt, Value::Int(a), Value::Int(b)) => {
-                Some(Value::Bool(a < b))
-            }
-
-            (Prim::Eq, Value::Int(a), Value::Int(b)) => {
-                Some(Value::Bool(a == b))
-            }
-
-            (Prim::Eq, Value::Bool(a), Value::Bool(b)) => {
-                Some(Value::Bool(a == b))
-            }
-
-            (Prim::And, Value::Bool(a), Value::Bool(b)) => {
-                Some(Value::Bool(a && b))
-            }
-
-            (Prim::Or, Value::Bool(a), Value::Bool(b)) => {
-                Some(Value::Bool(a || b))
-            }
-
-            (Prim::Div, Value::Int(a), Value::Int(b)) => {
-                if b == 0 {
-                    None
-                } else {
-                    Some(Value::Int(a.wrapping_div(b)))
-                }
-            }
-
-            (Prim::Mod, Value::Int(a), Value::Int(b)) => {
-                if b == 0 {
-                    None
-                } else {
-                    Some(Value::Int(a.wrapping_rem(b)))
-                }
-            }
-
-            _ => None,
-        }
-    }
-
-    /// Aplica um operador unário.
-    ///
-    /// `None` quando o operando não possui o tipo esperado.
-    fn apply_unary(self, value: Value) -> Option<Value> {
-        match (self, value) {
-            (Prim::Succ, Value::Int(n)) => {
-                Some(Value::Int(n.wrapping_add(1)))
-            }
-
-            (Prim::Pred, Value::Int(n)) => {
-                Some(Value::Int(n.wrapping_sub(1)))
-            }
-
-            (Prim::IsZero, Value::Int(n)) => {
-                Some(Value::Bool(n == 0))
-            }
-
+            (Prim::Add, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_add(b))),
+            (Prim::Sub, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_sub(b))),
+            (Prim::Mul, Value::Int(a), Value::Int(b)) => Some(Value::Int(a.wrapping_mul(b))),
+            (Prim::Lt, Value::Int(a), Value::Int(b)) => Some(Value::Bool(a < b)),
+            (Prim::Eq, Value::Int(a), Value::Int(b)) => Some(Value::Bool(a == b)),
+            (Prim::Eq, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a == b)),
+            (Prim::And, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a && b)),
+            (Prim::Or, Value::Bool(a), Value::Bool(b)) => Some(Value::Bool(a || b)),
             _ => None,
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
@@ -453,47 +360,36 @@ impl fmt::Display for Config {
 }
 
 crate::rules! {
+    /// Regras da máquina. Chamadas e retornos são regras próprias. Um estado
+    /// é `⟨código, pilha, ambiente, quadros⟩`; `k` é o resto do código.
     pub enum MachineRule {
         Const => "M-Const" {
             [] => r"\langle \mathsf{const}\ c :: k,\ s,\ e,\ f \rangle \to \langle k,\ c :: s,\ e,\ f \rangle"
         },
-
         Prim => "M-Prim" {
             [] => r"\langle \mathsf{prim}\ \oplus :: k,\ v_2 :: v_1 :: s,\ e,\ f \rangle \to \langle k,\ (v_1 \oplus v_2) :: s,\ e,\ f \rangle"
         },
-
-        UnaryPrim => "M-UnaryPrim" {
-            [] => r"\langle \mathsf{prim}\ \oplus :: k,\ v :: s,\ e,\ f \rangle \to \langle k,\ \oplus(v) :: s,\ e,\ f \rangle"
-        },
-
         Access => "M-Access" {
             [] => r"\langle \mathsf{access}\ n :: k,\ s,\ e,\ f \rangle \to \langle k,\ e(n) :: s,\ e,\ f \rangle"
         },
-
         Closure => "M-Closure" {
             [] => r"\langle \mathsf{closure}\ c' :: k,\ s,\ e,\ f \rangle \to \langle k,\ \langle c', e \rangle :: s,\ e,\ f \rangle"
         },
-
         Apply => "M-Apply" {
             [] => r"\langle \mathsf{apply} :: k,\ v :: \langle c', e' \rangle :: s,\ e,\ f \rangle \to \langle c',\ s,\ v :: e',\ (k, e) :: f \rangle"
         },
-
         Return => "M-Return" {
             [] => r"\langle [\,],\ s,\ e,\ (k, e') :: f \rangle \to \langle k,\ s,\ e',\ f \rangle"
         },
-
         Branch => "M-Branch" {
             [] => r"\langle \mathsf{branch}(c_1, c_2) :: k,\ \mathsf{true} :: s,\ e,\ f \rangle \to \langle c_1,\ s,\ e,\ (k, e) :: f \rangle"
         },
-
         Ref => "M-Ref" {
             [] => r"\langle \mathsf{ref} :: k,\ v :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ l :: s,\ e,\ f,\ \mu[l \mapsto v] \rangle"
         },
-
         Deref => "M-Deref" {
             [] => r"\langle \mathsf{deref} :: k,\ l :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ \mu(l) :: s,\ e,\ f,\ \mu \rangle"
         },
-
         Assign => "M-Assign" {
             [] => r"\langle \mathsf{assign} :: k,\ v :: l :: s,\ e,\ f,\ \mu \rangle \to \langle k,\ \mathsf{unit} :: s,\ e,\ f,\ \mu[l \mapsto v] \rangle"
         },
@@ -546,22 +442,10 @@ impl Step for Vm {
                     }
 
                     Instr::Prim(op) => {
-                        match op.arity() {
-                            1 => {
-                                let value = next.stack.pop()?;
-                                next.stack.push(op.apply_unary(value)?);
-                                MachineRule::UnaryPrim
-                            }
-
-                            2 => {
-                                let rhs = next.stack.pop()?;
-                                let lhs = next.stack.pop()?;
-                                next.stack.push(op.apply_binary(lhs, rhs)?);
-                                MachineRule::Prim
-                            }
-
-                            _ => unreachable!("primitive with unsupported arity"),
-                        }
+                        let rhs = next.stack.pop()?;
+                        let lhs = next.stack.pop()?;
+                        next.stack.push(op.apply(lhs, rhs)?);
+                        MachineRule::Prim
                     }
 
                     Instr::Access(index) => {
@@ -666,6 +550,9 @@ impl Machine for Vm {
 /// O que uma linguagem implementa para ser executada no [`Vm`]:
 /// a tradução (com os tipos apagados) e a relação entre valores.
 pub trait Compile {
+    /// A linguagem compila para a máquina? Falso em [`NoCompile`].
+    const AVAILABLE: bool = true;
+
     type Source;
     /// O tipo de valor da semântica natural da linguagem.
     type Value;
@@ -676,6 +563,27 @@ pub trait Compile {
     /// O valor da máquina representa o valor da linguagem? Para closures,
     /// basta que ambos sejam funções: não há igualdade extensional.
     fn corresponds(machine: &Value, source: &Self::Value) -> bool;
+}
+
+/// O marcador de uma linguagem que não compila para a máquina virtual (por
+/// exemplo, uma com classes e despacho dinâmico). Escreve-se
+/// `type Compiler = NoCompile<Term, Value>`.
+pub struct NoCompile<T, V>(std::marker::PhantomData<fn() -> (T, V)>);
+
+impl<T, V> Compile for NoCompile<T, V> {
+    const AVAILABLE: bool = false;
+
+    type Source = T;
+    type Value = V;
+    type Error = NotDefined;
+
+    fn compile(_: &T) -> Result<Program, NotDefined> {
+        Err(NotDefined)
+    }
+
+    fn corresponds(_: &Value, _: &V) -> bool {
+        false
+    }
 }
 
 /// Correção da compilação: se `t ⇓ v`, a máquina termina com um valor

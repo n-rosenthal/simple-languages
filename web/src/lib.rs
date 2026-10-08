@@ -93,9 +93,9 @@ impl Playground {
         registry::session(language).map(|inner| Playground { inner })
     }
 
+    /// Troca o modo, recusando um que a linguagem não suporta.
     pub fn change_mode(&mut self, name: &str) -> Result<(), String> {
-        self.inner.set_mode(Command::from_str(name)?);
-        Ok(())
+        self.inner.select_mode(Command::from_str(name)?)
     }
 }
 
@@ -124,6 +124,19 @@ impl Playground {
         self.inner.mode().name().to_string()
     }
 
+    /// Os modos que a linguagem suporta (uma sem big-step não tem `big`).
+    #[wasm_bindgen(js_name = availableModes)]
+    pub fn available_modes(&self) -> Vec<String> {
+        self.inner.modes().iter().map(|c| c.name().to_string()).collect()
+    }
+
+    /// O texto acabou cedo demais (um parêntese aberto, um `λx:A.` sem corpo)?
+    /// Então a página insere uma quebra de linha em vez de executar.
+    #[wasm_bindgen(js_name = needsMore)]
+    pub fn needs_more(&self, text: &str) -> bool {
+        self.inner.needs_more(text)
+    }
+
     #[wasm_bindgen(js_name = setMode)]
     pub fn set_mode(&mut self, name: &str) -> Result<(), JsError> {
         self.change_mode(name).map_err(|message| JsError::new(&message))
@@ -139,7 +152,8 @@ impl Playground {
         self.inner.set_fuel(fuel)
     }
 
-    /// Executa uma linha: um termo, uma definição ou um comando `:...`.
+    /// Executa um programa: uma ou mais instruções separadas por `;;` (um termo,
+    /// uma definição ou um comando `:...`), que podem ocupar várias linhas.
     pub fn submit(&mut self, line: &str) -> Reply {
         self.inner.submit(line).into()
     }

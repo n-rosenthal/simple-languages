@@ -19,6 +19,7 @@
 
 use std::fmt;
 
+use crate::common::diagnostic::{Diagnostic, Position};
 use crate::common::{SourceLine, Span};
 
 /// Um token: o tipo `K` (uma enum por linguagem), o texto e a posição.
@@ -70,32 +71,19 @@ pub fn ascii_word_continue(c: char) -> bool {
 pub struct LexSpec<K: 'static> {
     /// Palavras reservadas: `("if", If)`.
     pub keywords: &'static [(&'static str, K)],
-
     /// Símbolos: `("->", Arrow)`. Podem ter mais de um caractere, e mais de
     /// um símbolo pode ter o mesmo tipo (`λ` e `\`).
     pub symbols: &'static [(&'static str, K)],
-
     /// O tipo dos literais inteiros, se a linguagem os tiver.
     pub integer: Option<K>,
-
-    /// O tipo do literal inteiro `0`, quando `0` possui significado léxico
-    /// distinto dos demais inteiros.
-    ///
-    /// Quando `None`, `0` usa o tipo definido por [`LexSpec::integer`].
-    pub zero: Option<K>,
-
     /// O que fazer com as demais palavras.
     pub words: Words<K>,
-
     /// O começo de um comentário de linha (`"--"`), se houver.
     pub line_comment: Option<&'static str>,
-
     /// Os delimitadores de um comentário de bloco (`("(*", "*)")`), se houver.
     pub block_comment: Option<(&'static str, &'static str)>,
-
     /// Quais caracteres podem começar uma palavra.
     pub word_start: fn(char) -> bool,
-
     /// Quais caracteres podem continuar uma palavra.
     pub word_continue: fn(char) -> bool,
 }
@@ -107,7 +95,6 @@ impl<K: 'static> LexSpec<K> {
         keywords: &[],
         symbols: &[],
         integer: None,
-        zero: None,
         words: Words::Reject(""),
         line_comment: None,
         block_comment: None,
@@ -160,6 +147,36 @@ impl fmt::Display for LexError {
 
 impl std::error::Error for LexError {}
 
+impl Diagnostic for LexError {
+    fn message(&self) -> String {
+        match self {
+            Self::UnexpectedCharacter { character, .. } => {
+                format!("unexpected character `{character}`")
+            }
+            Self::UnknownWord { word, hint, .. } if hint.is_empty() => {
+                format!("unknown word `{word}`")
+            }
+            Self::UnknownWord { word, hint, .. } => format!("unknown word `{word}` ({hint})"),
+            Self::UnexpectedEndOfOperator { .. } => "unexpected end of operator".to_string(),
+            Self::UnterminatedComment { .. } => "unterminated comment".to_string(),
+        }
+    }
+
+    fn position(&self) -> Position {
+        match self {
+            Self::UnexpectedCharacter { span, .. }
+            | Self::UnknownWord { span, .. }
+            | Self::UnexpectedEndOfOperator { span }
+            | Self::UnterminatedComment { span, .. } => Position::Span(*span),
+        }
+    }
+
+    /// Um comentário de bloco aberto pode ser fechado por mais texto.
+    fn is_incomplete(&self) -> bool {
+        matches!(self, Self::UnterminatedComment { .. })
+    }
+}
+
 /// `chars[index..]` começa com `text`?
 fn starts_with(chars: &[char], index: usize, text: &str) -> bool {
     text.chars()
@@ -182,6 +199,8 @@ fn lex_line<K: Copy>(
     open: &mut OpenComment,
 ) -> Result<(), LexError> {
     let chars: Vec<char> = line.text.chars().collect();
+    // posições globais: o começo da linha no texto inteiro mais a coluna
+    let span = |from: usize, to: usize| Span::new(line.offset + from, line.offset + to);
     let mut index = 0;
 
     // um comentário de bloco que vem de uma linha anterior
@@ -222,7 +241,7 @@ fn lex_line<K: Copy>(
                         continue;
                     }
                     None => {
-                        *open = Some((line.number, Span::new(start, after)));
+                        *open = Some((line.number, span(start, after)));
                         return Ok(());
                     }
                 }
@@ -234,16 +253,8 @@ fn lex_line<K: Copy>(
             while index < chars.len() && chars[index].is_ascii_digit() {
                 index += 1;
             }
-
             let lexeme: String = chars[start..index].iter().collect();
-
-            let kind = if lexeme == "0" {
-                spec.zero.unwrap_or(kind)
-            } else {
-                kind
-            };
-
-            out.push(Token::new(kind, lexeme, Span::new(start, index)));
+            out.push(Token::new(kind, lexeme, span(start, index)));
             continue;
         }
 
@@ -253,7 +264,7 @@ fn lex_line<K: Copy>(
                 index += 1;
             }
             let lexeme: String = chars[start..index].iter().collect();
-            let span = Span::new(start, index);
+            let word_span = span(start, index);
 
             let keyword = spec
                 .keywords
@@ -263,10 +274,10 @@ fn lex_line<K: Copy>(
 
             match (keyword, spec.words) {
                 (Some(kind), _) | (None, Words::Identifier(kind)) => {
-                    out.push(Token::new(kind, lexeme, span));
+                    out.push(Token::new(kind, lexeme, word_span));
                 }
                 (None, Words::Reject(hint)) => {
-                    return Err(LexError::UnknownWord { word: lexeme, span, hint });
+                    return Err(LexError::UnknownWord { word: lexeme, span: word_span, hint });
                 }
             }
             continue;
@@ -281,17 +292,17 @@ fn lex_line<K: Copy>(
 
         if let Some((symbol, kind)) = longest {
             index += symbol.chars().count();
-            out.push(Token::new(*kind, *symbol, Span::new(start, index)));
+            out.push(Token::new(*kind, *symbol, span(start, index)));
             continue;
         }
 
         // Nenhum símbolo casou inteiro: se algum começa assim, o operador ficou
         // incompleto (`=` sem o segundo `=`); senão, o caractere não é da linguagem.
-        let span = Span::new(start, start + 1);
+        let here = span(start, start + 1);
         if spec.symbols.iter().any(|(symbol, _)| symbol.chars().next() == Some(c)) {
-            return Err(LexError::UnexpectedEndOfOperator { span });
+            return Err(LexError::UnexpectedEndOfOperator { span: here });
         }
-        return Err(LexError::UnexpectedCharacter { character: c, span });
+        return Err(LexError::UnexpectedCharacter { character: c, span: here });
     }
 
     Ok(())

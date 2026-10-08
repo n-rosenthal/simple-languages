@@ -11,8 +11,9 @@
 use std::marker::PhantomData;
 use std::str::FromStr;
 
+use crate::common::diagnostic::render;
 use crate::common::document::{blocks_to_text, Block};
-use crate::common::language::{law_violations, Language};
+use crate::common::language::{applicable_laws, capabilities, law_violations, Capabilities, Language};
 use crate::common::machine_language::{Compile, Vm};
 use crate::common::semantics::{run_with_fuel, BigStep, Machine, Typing, DEFAULT_FUEL};
 use crate::common::ToLatex;
@@ -90,6 +91,35 @@ impl Command {
     }
 }
 
+impl Command {
+    /// O modo faz sentido para uma linguagem com estas capacidades?
+    pub fn is_available(self, caps: Capabilities) -> bool {
+        match self {
+            Command::Type => caps.typing,
+            Command::Small => caps.small_step,
+            Command::Big => caps.big_step,
+            Command::Compile | Command::Machine => caps.compile,
+            Command::Parse | Command::Latex | Command::Laws | Command::Full => true,
+        }
+    }
+
+    /// O que falta à linguagem `language` para este modo.
+    pub fn requires(self) -> &'static str {
+        match self {
+            Command::Type => "a type system",
+            Command::Small => "small-step semantics",
+            Command::Big => "big-step semantics",
+            Command::Compile | Command::Machine => "a compiler to the virtual machine",
+            Command::Parse | Command::Latex | Command::Laws | Command::Full => "anything",
+        }
+    }
+
+    /// A mensagem de um modo indisponível: `stlc does not define big-step semantics`.
+    pub fn unavailable(self, language: &str) -> String {
+        format!("{language} does not define {}", self.requires())
+    }
+}
+
 impl FromStr for Command {
     type Err = String;
 
@@ -117,7 +147,8 @@ pub fn execute_with<L: Language>(
     source: &str,
     options: &Options,
 ) -> Result<String, String> {
-    let term = L::parse(source).map_err(|e| format!("syntax error: {e}"))?;
+    let term = L::parse(source)
+        .map_err(|e| format!("syntax error: {}", render(source, 0, &e)))?;
     execute_term::<L>(command, &term, options)
 }
 
@@ -138,6 +169,10 @@ pub fn execute_blocks<L: Language>(
     term: &L::Term,
     options: &Options,
 ) -> Result<Vec<Block>, String> {
+    if !command.is_available(capabilities::<L>()) {
+        return Err(command.unavailable(L::NAME));
+    }
+
     match command {
         Command::Parse => Ok(vec![term_block::<L>(term)]),
         Command::Type => typing::<L>(term),
@@ -223,44 +258,58 @@ fn machine<L: Language>(
 /// O modo `latex`: as três derivações como fórmulas, cujo `text` é o código
 /// LaTeX (`mathpartir`) para colar em um `.tex`.
 fn latex<L: Language>(term: &L::Term, options: &Options) -> Vec<Block> {
+    let caps = capabilities::<L>();
     let mut out = Vec::new();
 
-    match <L::Typing as Typing>::check(term) {
-        Ok(d) => {
-            let tex = d.to_latex_tree();
-            out.push(Block::math(
-                format!("% typing\n\\[\n{tex}\n\\]\n\n"),
-                d.to_katex_tree(),
-                tex,
-            ));
+    if caps.typing {
+        match <L::Typing as Typing>::check(term) {
+            Ok(d) => {
+                let tex = d.to_latex_tree();
+                out.push(Block::math(
+                    format!("% typing\n\\[\n{tex}\n\\]\n\n"),
+                    d.to_katex_tree(),
+                    tex,
+                ));
+            }
+            Err(e) => out.push(Block::Error(format!("% type error: {e}\n\n"))),
         }
-        Err(e) => out.push(Block::Error(format!("% type error: {e}\n\n"))),
     }
 
-    match <L::Big as BigStep>::evaluate(term) {
-        Ok(d) => {
-            let tex = d.to_latex_tree();
-            out.push(Block::math(
-                format!("% big-step\n\\[\n{tex}\n\\]\n\n"),
-                d.to_katex_tree(),
-                tex,
-            ));
+    if caps.big_step {
+        match <L::Big as BigStep>::evaluate(term) {
+            Ok(d) => {
+                let tex = d.to_latex_tree();
+                out.push(Block::math(
+                    format!("% big-step\n\\[\n{tex}\n\\]\n\n"),
+                    d.to_katex_tree(),
+                    tex,
+                ));
+            }
+            Err(e) => out.push(Block::Error(format!("% evaluation error: {e}\n\n"))),
         }
-        Err(e) => out.push(Block::Error(format!("% evaluation error: {e}\n\n"))),
     }
 
-    let trace = run_with_fuel::<L::Small>(term.clone(), options.fuel);
-    let tex = trace.to_latex_limited(options.max_steps_shown);
-    out.push(Block::math(
-        format!("% small-step\n\\[\n{tex}\n\\]\n"),
-        trace.to_katex_limited(options.max_steps_shown),
-        tex,
-    ));
+    if caps.small_step {
+        let trace = run_with_fuel::<L::Small>(term.clone(), options.fuel);
+        let tex = trace.to_latex_limited(options.max_steps_shown);
+        out.push(Block::math(
+            format!("% small-step\n\\[\n{tex}\n\\]\n"),
+            trace.to_katex_limited(options.max_steps_shown),
+            tex,
+        ));
+    }
 
     out
 }
 
 fn laws<L: Language>(term: &L::Term) -> Vec<Block> {
+    if applicable_laws::<L>() == 0 {
+        return vec![Block::Text(format!(
+            "no laws apply: {} does not define enough semantics to relate\n",
+            L::NAME
+        ))];
+    }
+
     let violated = law_violations::<L>(term);
 
     let text = if violated.is_empty() {
@@ -281,17 +330,31 @@ fn section(out: &mut Vec<Block>, title: &str, body: Result<Vec<Block>, String>) 
     }
 }
 
+/// Um estágio de `full` que a linguagem não define vira uma nota, não um erro.
+fn stage<L: Language>(
+    out: &mut Vec<Block>,
+    title: &str,
+    command: Command,
+    body: impl FnOnce() -> Result<Vec<Block>, String>,
+) {
+    if command.is_available(capabilities::<L>()) {
+        section(out, title, body());
+    } else {
+        section(out, title, Ok(vec![Block::Text(format!("not defined: {}\n", command.unavailable(L::NAME)))]));
+    }
+}
+
 /// Todos os estágios. Cada um é independente (os tipos são apagados na
 /// compilação), então um termo mal tipado ainda mostra como trava.
 fn full<L: Language>(term: &L::Term, options: &Options) -> Vec<Block> {
     let mut out = Vec::new();
 
     section(&mut out, "term", Ok(vec![term_block::<L>(term)]));
-    section(&mut out, "type", typing::<L>(term));
-    section(&mut out, "small-step", Ok(small_step::<L>(term, options)));
-    section(&mut out, "big-step", big_step::<L>(term));
-    section(&mut out, "machine code", compile::<L>(term));
-    section(&mut out, "machine", machine::<L>(term, false, options));
+    stage::<L>(&mut out, "type", Command::Type, || typing::<L>(term));
+    stage::<L>(&mut out, "small-step", Command::Small, || Ok(small_step::<L>(term, options)));
+    stage::<L>(&mut out, "big-step", Command::Big, || big_step::<L>(term));
+    stage::<L>(&mut out, "machine code", Command::Compile, || compile::<L>(term));
+    stage::<L>(&mut out, "machine", Command::Machine, || machine::<L>(term, false, options));
     section(&mut out, "laws", Ok(laws::<L>(term)));
 
     out

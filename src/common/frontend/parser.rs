@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use crate::common::diagnostic::{Diagnostic, Position};
 use crate::common::Span;
 
 use super::lexer::Token;
@@ -151,6 +152,43 @@ impl<K: fmt::Debug> fmt::Display for ParseError<K> {
 }
 
 impl<K: fmt::Debug> std::error::Error for ParseError<K> {}
+
+impl<K: fmt::Debug> Diagnostic for ParseError<K> {
+    fn message(&self) -> String {
+        match self {
+            Self::UnexpectedToken { expected: Some(expected), found, .. } => {
+                format!("expected `{expected:?}`, found `{found:?}`")
+            }
+            Self::UnexpectedToken { expected: None, found, .. } => {
+                format!("unexpected token `{found:?}`")
+            }
+            Self::UnexpectedEnd { expected: Some(expected) } => {
+                format!("expected `{expected:?}`, found end of input")
+            }
+            Self::UnexpectedEnd { expected: None } => "unexpected end of input".to_string(),
+            Self::UnexpectedTrailingToken { found, .. } => {
+                format!("unexpected trailing token `{found:?}`")
+            }
+            Self::InvalidInteger { lexeme, .. } => {
+                format!("integer `{lexeme}` does not fit in 64 bits")
+            }
+        }
+    }
+
+    fn position(&self) -> Position {
+        match self {
+            Self::UnexpectedToken { span, .. }
+            | Self::UnexpectedTrailingToken { span, .. }
+            | Self::InvalidInteger { span, .. } => Position::Span(*span),
+            Self::UnexpectedEnd { .. } => Position::EndOfInput,
+        }
+    }
+
+    /// A entrada acabou no meio de uma construção: mais texto poderia completá-la.
+    fn is_incomplete(&self) -> bool {
+        matches!(self, Self::UnexpectedEnd { .. })
+    }
+}
 
 // =============================================================================
 // Ajudantes

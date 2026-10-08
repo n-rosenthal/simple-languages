@@ -15,6 +15,7 @@
 
 use std::fmt::Display;
 
+use crate::common::diagnostic::Diagnostic;
 use crate::common::document::Block;
 use crate::common::machine_language::{compilation_is_correct, Compile, MachineRule};
 use crate::common::semantics::laws::{
@@ -56,7 +57,7 @@ pub trait Language {
     /// compará-lo ao resultado da semântica estrutural.
     type Value: Clone + Display + ToLatex + Into<Self::Term>;
 
-    type SyntaxError: std::error::Error;
+    type SyntaxError: std::error::Error + Diagnostic;
 
     type Typing: Typing<Term = Self::Term, Type = Self::Type>;
     type Small: Step<State = Self::Term>;
@@ -83,10 +84,31 @@ pub trait Language {
     }
 }
 
-/// Roda todas as leis genéricas sobre `term` e devolve os nomes das que
-/// *falham* (vazio = tudo certo). As leis que supõem um termo bem tipado
-/// valem vacuamente para os que não são.
+/// O que uma linguagem define: quais semânticas existem (as demais são
+/// marcadores `NoTyping`, `NoSmallStep`, `NoBigStep` e `NoCompile`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    pub typing: bool,
+    pub small_step: bool,
+    pub big_step: bool,
+    pub compile: bool,
+}
+
+pub fn capabilities<L: Language>() -> Capabilities {
+    Capabilities {
+        typing: <L::Typing as Typing>::DEFINED,
+        small_step: <L::Small as Step>::DEFINED,
+        big_step: <L::Big as BigStep>::DEFINED,
+        compile: <L::Compiler as Compile>::AVAILABLE,
+    }
+}
+
+/// Roda as leis genéricas que se aplicam à linguagem sobre `term` e devolve os
+/// nomes das que *falham* (vazio = tudo certo). Cada lei relaciona duas ou
+/// mais semânticas e só roda se todas existirem. As que supõem um termo bem
+/// tipado valem vacuamente para os que não são.
 pub fn law_violations<L: Language>(term: &L::Term) -> Vec<&'static str> {
+    let caps = capabilities::<L>();
     let mut violated = Vec::new();
     let mut check = |name: &'static str, holds: bool| {
         if !holds {
@@ -94,33 +116,65 @@ pub fn law_violations<L: Language>(term: &L::Term) -> Vec<&'static str> {
         }
     };
 
-    check(
-        "final states do not step",
-        final_states_do_not_step::<L::Small>(term),
-    );
-    check(
-        "small-step traces are connected",
-        trace_is_connected(&run::<L::Small>(term.clone())),
-    );
-    check(
-        "small-step agrees with big-step",
-        small_step_agrees_with_big_step::<L::Small, L::Big>(term),
-    );
-    check(
-        "well-typed terms evaluate (big-step)",
-        well_typed_evaluates::<L::Typing, L::Big>(term),
-    );
-    check(
-        "progress",
-        well_typed_never_gets_stuck::<L::Typing, L::Small>(term),
-    );
-    check("preservation", preservation::<L::Typing, L::Small>(term));
-    check(
-        "compilation is correct",
-        compilation_is_correct::<L::Compiler, L::Big>(term),
-    );
+    if caps.small_step {
+        check(
+            "final states do not step",
+            final_states_do_not_step::<L::Small>(term),
+        );
+        check(
+            "small-step traces are connected",
+            trace_is_connected(&run::<L::Small>(term.clone())),
+        );
+    }
+    if caps.small_step && caps.big_step {
+        check(
+            "small-step agrees with big-step",
+            small_step_agrees_with_big_step::<L::Small, L::Big>(term),
+        );
+    }
+    if caps.typing && caps.big_step {
+        check(
+            "well-typed terms evaluate (big-step)",
+            well_typed_evaluates::<L::Typing, L::Big>(term),
+        );
+    }
+    if caps.typing && caps.small_step {
+        check(
+            "progress",
+            well_typed_never_gets_stuck::<L::Typing, L::Small>(term),
+        );
+        check("preservation", preservation::<L::Typing, L::Small>(term));
+    }
+    if caps.compile && caps.big_step {
+        check(
+            "compilation is correct",
+            compilation_is_correct::<L::Compiler, L::Big>(term),
+        );
+    }
 
     violated
+}
+
+/// Quantas leis se aplicam a `L` (as de `law_violations`).
+pub fn applicable_laws<L: Language>() -> usize {
+    let caps = capabilities::<L>();
+    let mut count = 0;
+    if caps.small_step {
+        count += 2;
+    }
+    if caps.small_step && caps.big_step {
+        count += 1;
+    }
+    if caps.typing && caps.big_step {
+        count += 1;
+    }
+    if caps.typing && caps.small_step {
+        count += 2;
+    }
+    if caps.compile && caps.big_step {
+        count += 1;
+    }
+    count
 }
 
 // =============================================================================
@@ -189,32 +243,41 @@ fn rule_group<R: Rule>(out: &mut Vec<Block>, title: &str, judgment: &str, rules:
 /// As regras de `L`, agrupadas por julgamento: tipagem, as duas semânticas e
 /// a máquina virtual (compartilhada por todas as linguagens).
 pub fn rule_blocks<L: Language>() -> Vec<Block> {
+    let caps = capabilities::<L>();
     let mut out = Vec::new();
 
-    rule_group(
-        &mut out,
-        "tipagem",
-        r"\Gamma \vdash t : T",
-        <<L::Typing as Typing>::Rule as Rule>::all(),
-    );
-    rule_group(
-        &mut out,
-        "semântica estrutural (small-step)",
-        r"t \to t'",
-        <<L::Small as Step>::Rule as Rule>::all(),
-    );
-    rule_group(
-        &mut out,
-        "semântica natural (big-step)",
-        r"t \Downarrow v",
-        <<L::Big as BigStep>::Rule as Rule>::all(),
-    );
-    rule_group(
-        &mut out,
-        "máquina virtual (memória μ omitida onde não é usada)",
-        r"\langle c,\ s,\ e,\ f \rangle \to \langle c',\ s',\ e',\ f' \rangle",
-        MachineRule::all(),
-    );
+    if caps.typing {
+        rule_group(
+            &mut out,
+            "tipagem",
+            r"\Gamma \vdash t : T",
+            <<L::Typing as Typing>::Rule as Rule>::all(),
+        );
+    }
+    if caps.small_step {
+        rule_group(
+            &mut out,
+            "semântica estrutural (small-step)",
+            r"t \to t'",
+            <<L::Small as Step>::Rule as Rule>::all(),
+        );
+    }
+    if caps.big_step {
+        rule_group(
+            &mut out,
+            "semântica natural (big-step)",
+            r"t \Downarrow v",
+            <<L::Big as BigStep>::Rule as Rule>::all(),
+        );
+    }
+    if caps.compile {
+        rule_group(
+            &mut out,
+            "máquina virtual (memória μ omitida onde não é usada)",
+            r"\langle c,\ s,\ e,\ f \rangle \to \langle c',\ s',\ e',\ f' \rangle",
+            MachineRule::all(),
+        );
+    }
 
     out
 }

@@ -60,6 +60,53 @@ tudo pelo KaTeX em modo estrito:
 cargo run -q --example dump_latex | node web/tools/check-latex.mjs
 #+end_src
 
+* Programas, erros com posição e capacidades
+
+*Programas.* A caixa de entrada aceita várias linhas e várias instruções. As
+instruções se separam por =;;= (que, ao contrário de =;=, não faz parte da
+sintaxe de nenhuma linguagem do TAPL) e podem ocupar várias linhas:
+
+#+begin_example
+not = λb:Bool. if b then false else true ;;
+twice = λf:Bool->Bool.
+          λb:Bool. f (f b) ;;
+twice not true
+#+end_example
+
+Um programa para na primeira instrução que falha. /Enter/ executa; se o texto
+acabou cedo demais (um parêntese aberto, um =λx:A.= sem corpo), /Enter/ insere
+uma quebra de linha. /Shift+Enter/ sempre quebra a linha e /Ctrl+Enter/ sempre
+executa. No terminal, uma linha incompleta pede continuação com =...=, e uma
+linha em branco executa.
+
+*Erros com posição.* Um erro de sintaxe mostra o trecho do fonte com um =^=, com
+a linha e a coluna contadas no programa inteiro:
+
+#+begin_example
+syntax error: unexpected character `#`
+ --> 3:5
+  |
+3 |   y #
+  |     ^
+#+end_example
+
+As posições são offsets em =char=s no texto todo (=Span= em
+=src/common/source.rs=); o trait =Diagnostic= (=src/common/diagnostic.rs=) dá a
+mensagem, a posição e se a entrada está incompleta. Erros de tipo e de
+avaliação ainda não têm posição, porque os termos não guardam de onde vieram.
+
+*Capacidades.* Uma linguagem que não define uma semântica usa um marcador:
+=NoTyping=, =NoSmallStep=, =NoBigStep= ou =NoCompile=. O seletor de modo omite
+o que não existe, o modo =full= mostra "not defined" no estágio, as leis que
+dependem do que falta são puladas e a referência não lista as regras ausentes.
+
+#+begin_src rust
+type Typing   = NoTyping<Term>;                // sem sistema de tipos
+type Small    = NoSmallStep<Term>;             // sem semântica estrutural
+type Big      = NoBigStep<Term, Value>;        // sem semântica natural
+type Compiler = NoCompile<Term, Value>;        // não compila para a máquina
+#+end_src
+
 * Estrutura
 
 | arquivo             | função                                                         |

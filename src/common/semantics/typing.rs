@@ -12,7 +12,6 @@ use std::convert::Infallible;
 use std::fmt;
 use std::marker::PhantomData;
 
-use crate::common::context::Context;
 use crate::common::ToLatex;
 
 use super::derivation::{Derivation, Typed};
@@ -25,6 +24,9 @@ pub type TypingDerivation<T> = Derivation<
 >;
 
 pub trait Typing {
+    /// A linguagem tem sistema de tipos? Falso nos marcadores ([`NoTyping`]).
+    const DEFINED: bool = true;
+
     type Term: Clone;
     type Type: Clone;
     type Rule: Rule;
@@ -35,17 +37,6 @@ pub trait Typing {
     /// Linguagens com contexto mantêm um `check_in` próprio, que estende Γ,
     /// e chamam-no a partir daqui com Γ vazio.
     fn check(term: &Self::Term) -> Result<TypingDerivation<Self>, Self::Error>;
-
-    fn check_in(
-        _context: &Context<Self::Type>,
-        term: &Self::Term,
-    ) -> Result<TypingDerivation<Self>, Self::Error> {
-        let derivation = Self::check(term)?;
-        if !derivation.conclusion.context.is_empty() {
-            panic!("check_in: derivation has non-empty context");
-        }
-        Ok(derivation)
-    }
 
     /// Só o tipo, descartando a derivação.
     fn type_of(term: &Self::Term) -> Result<Self::Type, Self::Error> {
@@ -84,12 +75,15 @@ crate::rules! {
     }
 }
 
-/// `Typing` para linguagens sem sistema de tipos: todo termo é bem tipado,
-/// com o tipo [`Untyped`]. Quem usa o `Language` com uma linguagem
-/// não-tipada escreve `type Typing = NoTyping<Term>`.
+/// `Typing` para linguagens sem sistema de tipos. Para o código genérico (as
+/// leis, o driver) a tipagem simplesmente não existe (`DEFINED` é falso); se
+/// alguém a chamar assim mesmo, todo termo é bem tipado, com o tipo
+/// [`Untyped`]. Escreve-se `type Typing = NoTyping<Term>`.
 pub struct NoTyping<T>(PhantomData<fn() -> T>);
 
 impl<T: Clone> Typing for NoTyping<T> {
+    const DEFINED: bool = false;
+
     type Term = T;
     type Type = Untyped;
     type Rule = NoTypingRule;

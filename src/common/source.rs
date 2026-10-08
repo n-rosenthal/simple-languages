@@ -7,7 +7,9 @@
 
 use std::fmt;
 
-/// Um intervalo `start..end` em `char`s dentro de uma linha.
+/// Um intervalo `start..end` em `char`s no texto-fonte *inteiro* (não por
+/// linha): ele continua valendo em programas de várias linhas. O
+/// [`crate::common::diagnostic`] o converte em linha e coluna.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: usize,
@@ -25,6 +27,8 @@ impl Span {
 pub struct SourceLine {
     pub number: usize,
     pub text: String,
+    /// A posição, em `char`s, do começo da linha no texto inteiro.
+    pub offset: usize,
 }
 
 pub trait Scanner {
@@ -55,13 +59,13 @@ pub trait Parser {
 /// Erros produzidos pelo [`LineScanner`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanError {
-    UnexpectedControlCharacter { character: char, line: usize },
+    UnexpectedControlCharacter { character: char, line: usize, span: Span },
 }
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnexpectedControlCharacter { character, line } => write!(
+            Self::UnexpectedControlCharacter { character, line, .. } => write!(
                 f,
                 "unexpected control character {:?} on line {line}",
                 character
@@ -71,6 +75,24 @@ impl fmt::Display for ScanError {
 }
 
 impl std::error::Error for ScanError {}
+
+impl crate::common::diagnostic::Diagnostic for ScanError {
+    fn message(&self) -> String {
+        match self {
+            Self::UnexpectedControlCharacter { character, .. } => {
+                format!("unexpected control character {character:?}")
+            }
+        }
+    }
+
+    fn position(&self) -> crate::common::diagnostic::Position {
+        match self {
+            Self::UnexpectedControlCharacter { span, .. } => {
+                crate::common::diagnostic::Position::Span(*span)
+            }
+        }
+    }
+}
 
 /// Divide o texto em linhas numeradas a partir de 1. Linhas em branco são
 /// mantidas (a numeração acompanha o arquivo) e caracteres de controle,
@@ -94,20 +116,30 @@ impl Scanner for LineScanner {
 
     fn scan(input: &str) -> Result<Vec<SourceLine>, ScanError> {
         let mut lines = Vec::new();
+        let mut offset = 0;
 
-        // `str::lines` divide em `\n` e remove um `\r` final, então
-        // terminações Unix e Windows funcionam.
-        for (index, text) in input.lines().enumerate() {
+        // `split_inclusive` guarda o terminador, o que permite contar os
+        // `char`s de cada linha (inclusive `\r\n`) e dar a posição exata de
+        // cada uma no texto inteiro.
+        for (index, raw) in input.split_inclusive('\n').enumerate() {
             let number = index + 1;
+            let text = raw.strip_suffix('\n').unwrap_or(raw);
+            let text = text.strip_suffix('\r').unwrap_or(text);
 
-            if let Some(character) = text.chars().find(|c| c.is_control() && *c != '\t') {
+            if let Some((column, character)) = text
+                .chars()
+                .enumerate()
+                .find(|(_, c)| c.is_control() && *c != '\t')
+            {
                 return Err(ScanError::UnexpectedControlCharacter {
                     character,
                     line: number,
+                    span: Span::new(offset + column, offset + column + 1),
                 });
             }
 
-            lines.push(SourceLine { number, text: text.to_string() });
+            lines.push(SourceLine { number, text: text.to_string(), offset });
+            offset += raw.chars().count();
         }
 
         Ok(lines)

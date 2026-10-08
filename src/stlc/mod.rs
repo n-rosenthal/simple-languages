@@ -92,9 +92,12 @@ mod laws {
         use crate::common::language::Language;
 
         for example in Stlc::examples() {
-            // um exemplo pode ser uma definição `nome = termo`
-            let term = example.source.split_once(" = ").map_or(example.source, |(_, rhs)| rhs);
-            assert!(Stlc::parse(term).is_ok(), "{}", example.title);
+            // um exemplo pode ser um programa: instruções separadas por `;;`,
+            // cada uma um termo ou uma definição `nome = termo`
+            for statement in example.source.split(";;") {
+                let term = statement.split_once(" = ").map_or(statement, |(_, rhs)| rhs);
+                assert!(Stlc::parse(term.trim()).is_ok(), "{}: {statement}", example.title);
+            }
         }
     }
 

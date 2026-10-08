@@ -5,28 +5,45 @@
 //! Não faz entrada nem saída: o REPL do terminal e a página web (WASM)
 //! são apenas camadas finas sobre [`Interpreter::submit`].
 //!
-//! Uma linha pode ser:
+//! Uma submissão é um *programa*: uma ou mais instruções separadas por `;;`
+//! (as quebras de linha são espaço em branco, então uma instrução pode ocupar
+//! várias linhas). Cada instrução pode ser:
 //!
 //! - um termo, executado no modo atual (`full`, `type`, `small`, ...);
 //! - uma definição `nome = termo` (linguagens com variáveis; o termo é
-//!   expandido na hora e as definições são substituídas nas linhas
+//!   expandido na hora e as definições são substituídas nas instruções
 //!   seguintes);
 //! - um comando `:help`, `:mode`, `:fuel`, `:defs`, `:reset`,
-//!   `:examples`, `:example N`, `:quit`, ou `:<modo>` para trocar de modo.
+//!   `:examples`, `:example N`, `:syntax`, `:rules`, `:quit`, ou `:<modo>`
+//!   para trocar de modo.
 //!
-//! As entradas são limitadas ([`MAX_INPUT_CHARS`], [`MAX_NESTING`],
+//! Um programa para na primeira instrução que falha. Os erros de sintaxe
+//! mostram o trecho do fonte com um `^` sob o erro, com a linha e a coluna
+//! contadas no programa inteiro.
+//!
+//! [`Interpreter::needs_more`] diz se o texto acabou cedo demais (um
+//! parêntese aberto, um `λx:A.` sem corpo): o terminal e a página usam isso
+//! para pedir mais uma linha em vez de mostrar um erro.
+//!
+//! As entradas são limitadas ([`MAX_INPUT_CHARS`] por instrução,
+//! [`MAX_PROGRAM_CHARS`] e [`MAX_STATEMENTS`] no total, [`MAX_NESTING`],
 //! [`MAX_FUEL`]) porque o interpretador também roda no navegador, onde a
 //! pilha é pequena e um laço longo congela a aba.
 
 use std::fmt::Write as _;
 use std::str::FromStr;
 
+use crate::common::diagnostic::{render, Diagnostic};
 use crate::common::document::{blocks_to_text, Block};
 use crate::common::driver::{execute_blocks, Command, Options};
-use crate::common::language::{rule_blocks, syntax_blocks, Example, Language};
+use crate::common::language::{capabilities, rule_blocks, syntax_blocks, Example, Language};
 
-/// Tamanho máximo de uma linha, em caracteres.
+/// Tamanho máximo de uma instrução, em caracteres.
 pub const MAX_INPUT_CHARS: usize = 2_000;
+/// Tamanho máximo de um programa (todas as instruções), em caracteres.
+pub const MAX_PROGRAM_CHARS: usize = 20_000;
+/// Número máximo de instruções num programa.
+pub const MAX_STATEMENTS: usize = 100;
 /// Profundidade máxima de parênteses aninhados.
 pub const MAX_NESTING: usize = 100;
 /// Maior valor aceito por `:fuel`.
@@ -101,6 +118,15 @@ pub trait Interpreter {
     fn mode(&self) -> Command;
     fn set_mode(&mut self, command: Command);
 
+    /// Os modos que a linguagem suporta (um sem big-step não tem `big`).
+    fn modes(&self) -> Vec<Command>;
+
+    /// Troca o modo, recusando um que a linguagem não suporta.
+    fn select_mode(&mut self, command: Command) -> Result<(), String>;
+
+    /// O texto acabou cedo demais, e mais linhas poderiam completá-lo?
+    fn needs_more(&self, text: &str) -> bool;
+
     fn fuel(&self) -> usize;
     /// Limita o valor a `1..=MAX_FUEL` e devolve o valor efetivo.
     fn set_fuel(&mut self, fuel: usize) -> usize;
@@ -114,7 +140,8 @@ pub trait Interpreter {
     /// As regras de tipagem, das duas semânticas e da máquina, como blocos.
     fn rules(&self) -> Vec<Block>;
 
-    fn submit(&mut self, line: &str) -> Reply;
+    /// Executa um programa (uma ou mais instruções separadas por `;;`).
+    fn submit(&mut self, text: &str) -> Reply;
 }
 
 // =============================================================================
@@ -143,14 +170,16 @@ impl<L: Language> Session<L> {
             .fold(term, |term, (name, value)| L::substitute(&term, name, value))
     }
 
-    fn parse(&self, source: &str) -> Result<L::Term, Reply> {
+    /// Lê `source`, que começa na posição `shift` de `whole` (para o erro
+    /// mostrar a linha e a coluna do programa inteiro), e expande as definições.
+    fn parse(&self, whole: &str, shift: usize, source: &str) -> Result<L::Term, Reply> {
         L::parse(source)
             .map(|term| self.expand(term))
-            .map_err(|e| Reply::error(format!("syntax error: {e}")))
+            .map_err(|e| Reply::error(format!("syntax error: {}", render(whole, shift, &e))))
     }
 
-    fn evaluate(&self, source: &str) -> Reply {
-        let term = match self.parse(source) {
+    fn evaluate(&self, whole: &str, shift: usize, source: &str) -> Reply {
+        let term = match self.parse(whole, shift, source) {
             Ok(term) => term,
             Err(reply) => return reply,
         };
@@ -161,7 +190,7 @@ impl<L: Language> Session<L> {
         }
     }
 
-    fn define(&mut self, name: &str, source: &str) -> Reply {
+    fn define(&mut self, whole: &str, shift: usize, name: &str, source: &str) -> Reply {
         if !L::SUPPORTS_DEFINITIONS {
             return Reply::error(format!(
                 "{} has no variables, so definitions are not available",
@@ -172,7 +201,7 @@ impl<L: Language> Session<L> {
             return Reply::error(format!("missing term after `{name} =`"));
         }
 
-        let term = match self.parse(source) {
+        let term = match self.parse(whole, shift, source) {
             Ok(term) => term,
             Err(reply) => return reply,
         };
@@ -186,12 +215,24 @@ impl<L: Language> Session<L> {
         Reply::info(text)
     }
 
+    fn switch_mode(&mut self, command: Command) -> Reply {
+        match self.pick_mode(command) {
+            Ok(()) => Reply::info(format!("mode: {}", command.name())),
+            Err(message) => Reply::error(message),
+        }
+    }
+
+    fn pick_mode(&mut self, command: Command) -> Result<(), String> {
+        if !command.is_available(capabilities::<L>()) {
+            return Err(command.unavailable(L::NAME));
+        }
+        self.mode = command;
+        Ok(())
+    }
+
     fn change_mode(&mut self, name: &str) -> Reply {
         match Command::from_str(name) {
-            Ok(command) => {
-                self.mode = command;
-                Reply::info(format!("mode: {}", command.name()))
-            }
+            Ok(command) => self.switch_mode(command),
             Err(message) => Reply::error(message),
         }
     }
@@ -260,12 +301,18 @@ impl<L: Language> Session<L> {
         Reply::info(out)
     }
 
+    fn available_modes(&self) -> Vec<Command> {
+        let caps = capabilities::<L>();
+        Command::ALL.into_iter().filter(|c| c.is_available(caps)).collect()
+    }
+
     fn help(&self) -> String {
-        let modes: Vec<_> = Command::ALL.iter().map(|c| c.name()).collect();
+        let modes: Vec<_> = self.available_modes().iter().map(|c| c.name()).collect();
         let mut out = String::new();
 
         let _ = writeln!(out, "{}: {}", L::NAME, L::DESCRIPTION);
         let _ = writeln!(out, "  <term>               run the term in the current mode ({})", self.mode.name());
+        let _ = writeln!(out, "  <a> ;; <b>           several statements; a statement may span lines");
         if L::SUPPORTS_DEFINITIONS {
             let _ = writeln!(out, "  name = <term>        define a name, usable in later lines");
         }
@@ -278,6 +325,70 @@ impl<L: Language> Session<L> {
         let _ = writeln!(out, "  :syntax  :rules      the grammar / the inference rules (LaTeX in the terminal)");
         let _ = writeln!(out, "  :help  :quit");
         out
+    }
+
+    /// Uma instrução: um comando `:...`, uma definição ou um termo. `whole` é o
+    /// programa inteiro, para os erros mostrarem a posição nele.
+    fn statement(&mut self, whole: &str, statement: &Statement<'_>) -> Reply {
+        let source = statement.source;
+
+        if source.chars().count() > MAX_INPUT_CHARS {
+            return Reply::error(format!("input too long (limit: {MAX_INPUT_CHARS} characters)"));
+        }
+
+        if let Some(command) = source.strip_prefix(':') {
+            return self.meta(command);
+        }
+
+        if max_nesting(source) > MAX_NESTING {
+            return Reply::error(format!("too many nested parentheses (limit: {MAX_NESTING})"));
+        }
+
+        match split_definition(source) {
+            Some((name, body)) => {
+                let shift = statement.offset + chars_before(source, body);
+                self.define(whole, shift, name, body)
+            }
+            None => self.evaluate(whole, statement.offset, source),
+        }
+    }
+
+    /// Várias instruções: cada uma mostra o que foi executado e o resultado, e
+    /// o programa para na primeira que falha.
+    fn program(&mut self, whole: &str, statements: &[Statement<'_>]) -> Reply {
+        let mut blocks = Vec::new();
+        let mut kind = ReplyKind::Info;
+        let mut quit = false;
+
+        for statement in statements {
+            let first_line = statement.source.lines().next().unwrap_or("");
+            let more = if statement.source.lines().count() > 1 { " …" } else { "" };
+            blocks.push(Block::Text(format!("> {first_line}{more}\n")));
+
+            let reply = self.statement(whole, statement);
+            quit |= reply.quit;
+
+            if reply.blocks.is_empty() {
+                let text = reply.text;
+                blocks.push(match reply.kind {
+                    ReplyKind::Error => Block::Error(text),
+                    _ => Block::Text(text),
+                });
+            } else {
+                blocks.extend(reply.blocks);
+            }
+
+            match reply.kind {
+                ReplyKind::Error => {
+                    kind = ReplyKind::Error;
+                    break;
+                }
+                ReplyKind::Output => kind = ReplyKind::Output,
+                ReplyKind::Info => {}
+            }
+        }
+
+        Reply { kind, text: blocks_to_text(&blocks), blocks, quit }
     }
 
     fn meta(&mut self, text: &str) -> Reply {
@@ -309,10 +420,7 @@ impl<L: Language> Session<L> {
             ("example" | "load", None) => self.list_examples(),
 
             (other, _) => match Command::from_str(other) {
-                Ok(command) => {
-                    self.mode = command;
-                    Reply::info(format!("mode: {}", command.name()))
-                }
+                Ok(command) => self.switch_mode(command),
                 Err(_) => Reply::error(format!("unknown command `:{other}` (try :help)")),
             },
         }
@@ -323,6 +431,41 @@ impl<L: Language> Default for Session<L> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Uma instrução de um programa: o texto e a posição dele (em `char`s) no
+/// programa inteiro.
+struct Statement<'a> {
+    source: &'a str,
+    offset: usize,
+}
+
+/// Divide o programa em instruções por `;;`, ignorando as vazias. (`;;` não faz
+/// parte da sintaxe de nenhuma linguagem, ao contrário de `;`, que o TAPL usa
+/// para sequência.)
+fn split_statements(text: &str) -> Vec<Statement<'_>> {
+    let mut statements = Vec::new();
+    let mut cursor = 0; // em bytes
+
+    for piece in text.split(";;") {
+        let source = piece.trim();
+        if !source.is_empty() {
+            let leading = piece.len() - piece.trim_start().len();
+            statements.push(Statement {
+                source,
+                offset: text[..cursor + leading].chars().count(),
+            });
+        }
+        cursor += piece.len() + 2;
+    }
+
+    statements
+}
+
+/// Quantos `char`s há em `outer` antes de `inner`, que é um pedaço de `outer`.
+fn chars_before(outer: &str, inner: &str) -> usize {
+    let byte = inner.as_ptr() as usize - outer.as_ptr() as usize;
+    outer[..byte].chars().count()
 }
 
 /// Maior profundidade de parênteses aninhados na linha.
@@ -385,6 +528,37 @@ impl<L: Language> Interpreter for Session<L> {
         self.mode = command;
     }
 
+    fn modes(&self) -> Vec<Command> {
+        self.available_modes()
+    }
+
+    fn select_mode(&mut self, command: Command) -> Result<(), String> {
+        self.pick_mode(command)
+    }
+
+    fn needs_more(&self, text: &str) -> bool {
+        let text = text.trim();
+        if text.is_empty() || text.starts_with(':') || text.ends_with(";;") {
+            return false;
+        }
+
+        // só a última instrução pode estar incompleta
+        let Some(last) = split_statements(text).pop() else {
+            return false;
+        };
+        if last.source.starts_with(':') {
+            return false;
+        }
+
+        let source = match split_definition(last.source) {
+            Some((_, "")) => return true, // `f =` espera o termo
+            Some((_, body)) => body,
+            None => last.source,
+        };
+
+        L::parse(source).is_err_and(|e| e.is_incomplete())
+    }
+
     fn fuel(&self) -> usize {
         self.options.fuel
     }
@@ -409,27 +583,24 @@ impl<L: Language> Interpreter for Session<L> {
         rule_blocks::<L>()
     }
 
-    fn submit(&mut self, line: &str) -> Reply {
-        let line = line.trim();
+    fn submit(&mut self, text: &str) -> Reply {
+        let text = text.trim();
 
-        if line.is_empty() {
+        if text.is_empty() {
             return Reply::info("");
         }
-        if line.chars().count() > MAX_INPUT_CHARS {
-            return Reply::error(format!("input too long (limit: {MAX_INPUT_CHARS} characters)"));
+        if text.chars().count() > MAX_PROGRAM_CHARS {
+            return Reply::error(format!("program too long (limit: {MAX_PROGRAM_CHARS} characters)"));
         }
 
-        if let Some(command) = line.strip_prefix(':') {
-            return self.meta(command);
-        }
-
-        if max_nesting(line) > MAX_NESTING {
-            return Reply::error(format!("too many nested parentheses (limit: {MAX_NESTING})"));
-        }
-
-        match split_definition(line) {
-            Some((name, source)) => self.define(name, source),
-            None => self.evaluate(line),
+        let statements = split_statements(text);
+        match statements.len() {
+            0 => Reply::info(""),
+            1 => self.statement(text, &statements[0]),
+            n if n > MAX_STATEMENTS => {
+                Reply::error(format!("too many statements (limit: {MAX_STATEMENTS})"))
+            }
+            _ => self.program(text, &statements),
         }
     }
 }

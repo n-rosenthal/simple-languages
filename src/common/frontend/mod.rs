@@ -22,6 +22,7 @@ mod parser;
 
 use std::fmt;
 
+use crate::common::diagnostic::{Diagnostic, Position};
 use crate::common::{Lexer, Parser, Scanner};
 
 pub use lexer::{ascii_word_continue, ascii_word_start, lex, LexError, LexSpec, Token, Words};
@@ -54,6 +55,32 @@ where
     L: fmt::Debug + fmt::Display,
     P: fmt::Debug + fmt::Display,
 {
+}
+
+impl<S: Diagnostic, L: Diagnostic, P: Diagnostic> Diagnostic for FrontendError<S, L, P> {
+    fn message(&self) -> String {
+        match self {
+            Self::Scan(e) => e.message(),
+            Self::Lex(e) => e.message(),
+            Self::Parse(e) => e.message(),
+        }
+    }
+
+    fn position(&self) -> Position {
+        match self {
+            Self::Scan(e) => e.position(),
+            Self::Lex(e) => e.position(),
+            Self::Parse(e) => e.position(),
+        }
+    }
+
+    fn is_incomplete(&self) -> bool {
+        match self {
+            Self::Scan(e) => e.is_incomplete(),
+            Self::Lex(e) => e.is_incomplete(),
+            Self::Parse(e) => e.is_incomplete(),
+        }
+    }
 }
 
 /// Texto → termo: roda o scanner, o lexer e o parser de uma linguagem.

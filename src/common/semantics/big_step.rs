@@ -6,6 +6,9 @@
 //! trava e um que diverge são indistinguíveis (TAPL, cap. 3); ambos
 //! simplesmente não têm derivação.
 
+use std::marker::PhantomData;
+
+use super::capability::NotDefined;
 use super::derivation::{Derivation, Eval};
 use super::Rule;
 
@@ -16,6 +19,9 @@ pub type EvalDerivation<B> = Derivation<
 >;
 
 pub trait BigStep {
+    /// A linguagem tem esta semântica? Falso em [`NoBigStep`].
+    const DEFINED: bool = true;
+
     type Term: Clone;
     type Value: Clone;
     type Rule: Rule;
@@ -27,6 +33,29 @@ pub trait BigStep {
     /// Só o valor, descartando a derivação.
     fn value_of(term: &Self::Term) -> Result<Self::Value, Self::Error> {
         Self::evaluate(term).map(|derivation| derivation.conclusion.value)
+    }
+}
+
+crate::rules! {
+    pub enum NoBigStepRule {
+        Undefined => "E-Undefined",
+    }
+}
+
+/// O marcador de uma linguagem sem semântica natural: avaliar sempre falha
+/// com [`NotDefined`]. Escreve-se `type Big = NoBigStep<Term, Value>`.
+pub struct NoBigStep<T, V>(PhantomData<fn() -> (T, V)>);
+
+impl<T: Clone, V: Clone> BigStep for NoBigStep<T, V> {
+    const DEFINED: bool = false;
+
+    type Term = T;
+    type Value = V;
+    type Rule = NoBigStepRule;
+    type Error = NotDefined;
+
+    fn evaluate(_: &T) -> Result<EvalDerivation<Self>, NotDefined> {
+        Err(NotDefined)
     }
 }
 

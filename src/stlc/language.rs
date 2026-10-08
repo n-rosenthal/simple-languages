@@ -31,8 +31,8 @@ const EXAMPLES: &[Example] = &[
         source: "(λf:Bool->Bool. λb:Bool. f (f b)) (λb:Bool. if b then false else true) true",
     },
     Example {
-        title: "Definição (use depois como `twice not true`)",
-        source: "twice = λf:Bool->Bool. λb:Bool. f (f b)",
+        title: "Programa: definições e uso (instruções separadas por `;;`)",
+        source: "not = λb:Bool. if b then false else true ;; twice = λf:Bool->Bool. λb:Bool. f (f b) ;; twice not true",
     },
     Example { title: "Substituição sem captura (termo aberto)", source: "(λx:A. λy:A. x) (λz:A. y)" },
     Example { title: "Erro de tipo", source: "(λx:Bool. x) (λy:Bool. y)" },

@@ -18,6 +18,7 @@
 //! derivação, e o resultado é um erro.
 
 use std::fmt;
+use std::marker::PhantomData;
 
 use crate::common::ToLatex;
 
@@ -63,6 +64,9 @@ impl<R, S: Clone> Transition<R, S> {
 // =============================================================================
 
 pub trait Step {
+    /// A linguagem tem esta semântica? Falso em [`NoSmallStep`].
+    const DEFINED: bool = true;
+
     type State: Clone;
     type Rule: Rule;
 
@@ -73,6 +77,35 @@ pub trait Step {
     /// Estado final: um valor (small-step) ou uma máquina parada.
     /// Estados finais não dão passos (ver `laws::final_states_do_not_step`).
     fn is_final(state: &Self::State) -> bool;
+}
+
+// =============================================================================
+// Sem semântica estrutural
+// =============================================================================
+
+crate::rules! {
+    pub enum NoStepRule {
+        Undefined => "E-Undefined",
+    }
+}
+
+/// O marcador de uma linguagem sem semântica estrutural: nenhum termo dá
+/// passo e nenhum é final. Escreve-se `type Small = NoSmallStep<Term>`.
+pub struct NoSmallStep<T>(PhantomData<fn() -> T>);
+
+impl<T: Clone> Step for NoSmallStep<T> {
+    const DEFINED: bool = false;
+
+    type State = T;
+    type Rule = NoStepRule;
+
+    fn step(_: &T) -> Option<Transition<NoStepRule, T>> {
+        None
+    }
+
+    fn is_final(_: &T) -> bool {
+        false
+    }
 }
 
 // =============================================================================

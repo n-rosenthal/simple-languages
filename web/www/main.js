@@ -228,6 +228,7 @@ function clearLog() {
 // --- painel lateral ----------------------------------------------------------
 
 function syncControls() {
+  fill(el.mode, playground.availableModes()); // uma linguagem sem big-step não tem o modo `big`
   el.mode.value = playground.mode();
   el.fuel.value = playground.fuel();
   el.prompt.textContent = `${playground.mode()} ❯`;
@@ -259,6 +260,7 @@ function renderExamples() {
     code.title = "Copiar para a linha de comando";
     code.addEventListener("click", () => {
       el.line.value = source;
+      autosize();
       el.line.focus();
     });
 
@@ -434,14 +436,25 @@ function openLanguage(name, params = {}, { quiet = false } = {}) {
 
 // --- eventos -----------------------------------------------------------------
 
+function autosize() {
+  el.line.style.height = "auto";
+  el.line.style.height = `${el.line.scrollHeight}px`;
+}
+
+function submitLine() {
+  const text = el.line.value;
+  el.line.value = "";
+  autosize();
+  execute(text);
+}
+
 el.form.addEventListener("submit", (event) => {
   event.preventDefault();
-  const line = el.line.value;
-  el.line.value = "";
-  execute(line);
+  submitLine();
 });
 
 el.line.addEventListener("input", () => {
+  autosize();
   // `\` vira λ (mesmo comprimento, então o cursor não se move)
   if (el.line.value.includes("\\")) {
     const caret = el.line.selectionStart;
@@ -451,14 +464,26 @@ el.line.addEventListener("input", () => {
 });
 
 el.line.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowUp") {
-    if (cursor === inputHistory.length) draft = el.line.value;
-    if (cursor > 0) el.line.value = inputHistory[--cursor];
+  const { value, selectionStart, selectionEnd } = el.line;
+
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    // Enter executa, a menos que falte texto (um parêntese aberto, um `λx:A.`
+    // sem corpo): então insere uma quebra de linha. Ctrl/⌘+Enter sempre executa.
+    const force = event.ctrlKey || event.metaKey;
+    if (!force && playground.needsMore(value)) return;
     event.preventDefault();
-  } else if (event.key === "ArrowDown") {
+    submitLine();
+  } else if (event.key === "ArrowUp" && !value.slice(0, selectionStart).includes("\n")) {
+    // numa entrada de várias linhas, ↑ só navega no histórico na primeira linha
+    if (cursor === inputHistory.length) draft = value;
+    if (cursor > 0) el.line.value = inputHistory[--cursor];
+    autosize();
+    event.preventDefault();
+  } else if (event.key === "ArrowDown" && !value.slice(selectionEnd).includes("\n")) {
     if (cursor < inputHistory.length) {
       cursor++;
       el.line.value = cursor === inputHistory.length ? draft : inputHistory[cursor];
+      autosize();
     }
     event.preventDefault();
   } else if (event.ctrlKey && event.key.toLowerCase() === "l") {

@@ -1,6 +1,7 @@
 //! O backbone compartilhado por todas as linguagens.
 
 pub mod source;
+pub mod diagnostic;
 pub mod frontend;
 pub mod latex;
 pub mod context;
@@ -11,9 +12,9 @@ pub mod language;
 pub mod driver;
 pub mod interpreter;
 pub mod document;
-pub mod ast;
 
 pub use context::Context;
+pub use diagnostic::{Diagnostic, Position};
 pub use document::Block;
 pub use latex::ToLatex;
 pub use source::{Lexer, Parser, Scanner, SourceLine, Span};
