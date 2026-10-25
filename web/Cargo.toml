@@ -1,8 +1,8 @@
 [package]
-name = "tapl-web"
-version = "0.1.0"
+name = "simple-languages-web"
+version = "0.1.1"
 edition = "2021"
-description = "Front-end WebAssembly do interpretador de linguagens do TAPL"
+description = "Front-end WebAssembly para os interpretadores das simple languages"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -1,0 +1,17 @@
+Em ~common/semantics/context/~, temos a definição de um *trait* para contextos (de tipagem, de avaliação ou outros).
+Todo contexto deverá obedecer à /interface/ ~Context<B>~. Diversas implementações são possíveis para contextos:
+
+1. contextos enquanto /listas encadeadas/;
+2. contextos enquanto /mapeamento de nomes para objetos/ (i.e., /hashing/)
+
+Como não podemos implementar iteradores da mesma forma para todos os contextos, ~iter()~ fica de fora do nosso /trait/. Faremos uma separação entre a /interface/ essencial, que define o contexto, e a /interface/ *de inspeção*.
+
+#+begin_example
+common/
+└── semantics/
+    └── context/
+        ├── mod.rs
+        ├── linked.rs
+        ├── map.rs
+        └── traits.rs
+#+end_example

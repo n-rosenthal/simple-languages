@@ -1,6 +1,7 @@
 //! Os traits de semântica: regras, derivações, passos, big-step,
 //! máquinas e tipagem. Cada linguagem os implementa.
 
+pub mod context;
 pub mod capability;
 pub mod rule;
 pub mod derivation;
@@ -12,6 +13,13 @@ pub mod laws;
 
 #[cfg(test)]
 pub(crate) mod toy;
+
+pub use context::{
+    Context,
+    IndexedContext,
+    LinkedContext,
+    MapContext,
+};
 
 pub use big_step::{BigStep, EvalDerivation, NoBigStep, NoBigStepRule};
 pub use capability::NotDefined;

@@ -3,7 +3,7 @@
 // Toda a lógica (parser, tipos, semânticas, máquina) roda em Rust, compilado
 // para WebAssembly. Este arquivo só liga a interface a `Playground.submit`.
 
-import init, { Playground, languages, modes } from "./pkg/tapl_web.js";
+import init, { Playground, languages, modes } from "./pkg/simple_languages_web.js";
 
 const $ = (id) => document.getElementById(id);
 
