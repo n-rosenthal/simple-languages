@@ -3,11 +3,19 @@
 //! Para registrar uma nova linguagem, acrescente uma linha em
 //! `RUNNERS` e outra em `SESSIONS`.
 
-use crate::arith::Arith;
 use crate::common::driver::{Dispatch, Runner};
 use crate::common::language::Language;
 use crate::common::interpreter::{Interpreter, Session};
+
+use crate::arith::Arith;
 use crate::stlc::Stlc;
+use crate::typed_arith::TypedArith;
+use crate::lambda::{
+    LambdaName      as LambdaCallByName,
+    LambdaValue     as LambdaCallByValue,
+    LambdaNormal    as LambdaNormalOrder,
+};
+
 
 type MakeRunner = fn() -> Box<dyn Runner>;
 type MakeSession = fn() -> Box<dyn Interpreter>;
@@ -20,12 +28,27 @@ fn session_of<L: Language + 'static>() -> Box<dyn Interpreter> {
     Box::new(Session::<L>::new())
 }
 
-const RUNNERS: &[MakeRunner] = &[runner::<Arith>, runner::<Stlc>];
+const RUNNERS: &[MakeRunner] = &[
+    runner::<Arith>,
+    runner::<TypedArith>,
+
+    runner::<LambdaCallByName>,
+    runner::<LambdaCallByValue>,
+    runner::<LambdaNormalOrder>,    
+
+    runner::<Stlc>,
+    ];
 
 const SESSIONS: &[(&str, MakeSession)] = &[
     (Arith::NAME, session_of::<Arith>),
+    (TypedArith::NAME, session_of::<TypedArith>),
+    
+    (LambdaCallByName::NAME, session_of::<LambdaCallByName>),
+    (LambdaCallByValue::NAME, session_of::<LambdaCallByValue>),
+    (LambdaNormalOrder::NAME, session_of::<LambdaNormalOrder>),
+    
     (Stlc::NAME, session_of::<Stlc>),
-];
+    ];
 
 /// Os nomes das linguagens, na ordem de registro.
 pub fn names() -> Vec<&'static str> {

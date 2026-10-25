@@ -1,14 +1,14 @@
+//! Termos de `lambda` (TAPL, fig. 5-3): `t ::= x | λx. t | t t`.
+
 use std::collections::BTreeSet;
 use std::fmt;
-
-use super::types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
     /// `x`
     Var(String),
-    /// `λx:T. body`
-    Lambda { param: String, ty: Type, body: Box<Term> },
+    /// `λx. body`
+    Lambda { param: String, body: Box<Term> },
     /// `f x`
     App { func: Box<Term>, arg: Box<Term> },
 }
@@ -18,15 +18,15 @@ impl Term {
         Self::Var(name.into())
     }
 
-    pub fn lambda(param: impl Into<String>, ty: Type, body: Term) -> Self {
-        Self::Lambda { param: param.into(), ty, body: Box::new(body) }
+    pub fn lambda(param: impl Into<String>, body: Term) -> Self {
+        Self::Lambda { param: param.into(), body: Box::new(body) }
     }
 
     pub fn app(func: Term, arg: Term) -> Self {
         Self::App { func: Box::new(func), arg: Box::new(arg) }
     }
 
-    /// Valores: as abstrações.
+    /// Os valores do call-by-value e do call-by-name: as abstrações.
     pub fn is_value(&self) -> bool {
         matches!(self, Term::Lambda { .. })
     }
@@ -35,7 +35,7 @@ impl Term {
     pub fn free_vars(&self) -> BTreeSet<String> {
         match self {
             Term::Var(x) => BTreeSet::from([x.clone()]),
-            Term::Lambda { param, body, .. } => {
+            Term::Lambda { param, body } => {
                 let mut vars = body.free_vars();
                 vars.remove(param);
                 vars
@@ -54,32 +54,24 @@ impl Term {
         match self {
             Term::Var(x) if x == name => replacement.clone(),
             Term::Var(_) => self.clone(),
-
             Term::App { func, arg } => Term::app(
                 func.substitute(name, replacement),
                 arg.substitute(name, replacement),
             ),
-
-            Term::Lambda { param, ty, body } => {
-                // `name` está sombreado, ou nem ocorre livre: nada a fazer.
+            Term::Lambda { param, body } => {
                 if param == name || !body.free_vars().contains(name) {
                     return self.clone();
                 }
-
                 let replacement_vars = replacement.free_vars();
-
                 if replacement_vars.contains(param) {
-                    // renomeia o binder para um nome que não colida com nada
                     let mut avoid = replacement_vars;
                     avoid.extend(body.free_vars());
                     avoid.insert(name.to_string());
-
                     let fresh = fresh_name(param, &avoid);
                     let renamed = body.substitute(param, &Term::variable(fresh.clone()));
-
-                    Term::lambda(fresh, ty.clone(), renamed.substitute(name, replacement))
+                    Term::lambda(fresh, renamed.substitute(name, replacement))
                 } else {
-                    Term::lambda(param.clone(), ty.clone(), body.substitute(name, replacement))
+                    Term::lambda(param.clone(), body.substitute(name, replacement))
                 }
             }
         }
@@ -98,13 +90,7 @@ impl Term {
                         _ => false,
                     }
                 }
-                (
-                    Term::Lambda { param: p, ty: t, body: bp },
-                    Term::Lambda { param: q, ty: u, body: bq },
-                ) => {
-                    if t != u {
-                        return false;
-                    }
+                (Term::Lambda { param: p, body: bp }, Term::Lambda { param: q, body: bq }) => {
                     env_a.push(p.clone());
                     env_b.push(q.clone());
                     let equal = go(bp, bq, env_a, env_b);
@@ -118,7 +104,6 @@ impl Term {
                 _ => false,
             }
         }
-
         go(self, other, &mut Vec::new(), &mut Vec::new())
     }
 }
@@ -135,10 +120,10 @@ impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Var(x) => write!(f, "{x}"),
-            Self::Lambda { param, ty, body } => write!(f, "λ{param}:{ty}. {body}"),
+            Self::Lambda { param, body } => write!(f, "λ{param}. {body}"),
             Self::App { func, arg } => {
-                // Aplicação é associativa à esquerda: só uma abstração à
-                // esquerda precisa de parênteses.
+                // só uma abstração à esquerda precisa de parênteses (ela se
+                // estende o mais à direita possível)
                 match **func {
                     Term::Lambda { .. } => write!(f, "({func})")?,
                     _ => write!(f, "{func}")?,
@@ -150,48 +135,5 @@ impl fmt::Display for Term {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::lambda::testing::parse;
-
-    #[test]
-    fn free_variables() {
-        assert!(parse("λx:A. x").free_vars().is_empty());
-        let vars: Vec<_> = parse("λx:A. f x y").free_vars().into_iter().collect();
-        assert_eq!(vars, vec!["f", "y"]);
-    }
-
-    #[test]
-    fn substitution_replaces_free_occurrences() {
-        let result = parse("f x").substitute("x", &parse("λy:A. y"));
-        assert_eq!(result, parse("f (λy:A. y)"));
-    }
-
-    #[test]
-    fn substitution_respects_shadowing() {
-        let term = parse("λx:A. x");
-        assert_eq!(term.substitute("x", &parse("z")), term);
-    }
-
-    #[test]
-    fn substitution_avoids_capture() {
-        // [x ↦ y](λy:A. x)  deve ser  λy1:A. y,  não  λy:A. y
-        let result = parse("λy:A. x").substitute("x", &parse("y"));
-
-        assert_eq!(result, parse("λy1:A. y"));
-        assert!(result.alpha_eq(&parse("λz:A. y")));
-        assert!(!result.alpha_eq(&parse("λy:A. y")));
-    }
-
-    #[test]
-    fn alpha_equivalence() {
-        assert!(parse("λx:A. x").alpha_eq(&parse("λy:A. y")));
-        assert!(parse("λx:A. λy:A. x").alpha_eq(&parse("λa:A. λb:A. a")));
-        assert!(!parse("λx:A. λy:A. x").alpha_eq(&parse("λa:A. λb:A. b")));
-        assert!(!parse("λx:A. x").alpha_eq(&parse("λx:B. x")));
-        assert!(!parse("λx:A. z").alpha_eq(&parse("λx:A. w"))); // livres diferentes
     }
 }

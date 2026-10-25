@@ -118,6 +118,8 @@ pub enum ParseError<K> {
     UnexpectedTrailingToken { found: K, span: Span },
     /// Um literal que não cabe em `i64`.
     InvalidInteger { lexeme: String, span: Span },
+    /// Um literal acima do máximo que a linguagem aceita.
+    IntegerTooLarge { lexeme: String, span: Span, max: i64 },
 }
 
 impl<K: fmt::Debug> fmt::Display for ParseError<K> {
@@ -147,6 +149,11 @@ impl<K: fmt::Debug> fmt::Display for ParseError<K> {
                 "integer `{lexeme}` at {}..{} does not fit in 64 bits",
                 span.start, span.end
             ),
+            Self::IntegerTooLarge { lexeme, span, max } => write!(
+                f,
+                "integer `{lexeme}` at {}..{} is larger than the maximum, {max}",
+                span.start, span.end
+            ),
         }
     }
 }
@@ -172,6 +179,9 @@ impl<K: fmt::Debug> Diagnostic for ParseError<K> {
             Self::InvalidInteger { lexeme, .. } => {
                 format!("integer `{lexeme}` does not fit in 64 bits")
             }
+            Self::IntegerTooLarge { lexeme, max, .. } => {
+                format!("integer `{lexeme}` is larger than the maximum, {max}")
+            }
         }
     }
 
@@ -179,7 +189,8 @@ impl<K: fmt::Debug> Diagnostic for ParseError<K> {
         match self {
             Self::UnexpectedToken { span, .. }
             | Self::UnexpectedTrailingToken { span, .. }
-            | Self::InvalidInteger { span, .. } => Position::Span(*span),
+            | Self::InvalidInteger { span, .. }
+            | Self::IntegerTooLarge { span, .. } => Position::Span(*span),
             Self::UnexpectedEnd { .. } => Position::EndOfInput,
         }
     }
