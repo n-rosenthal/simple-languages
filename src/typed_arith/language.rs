@@ -1,7 +1,10 @@
 //! `typed-arith` como instância de [`Language`].
 
+/// parsing: source-code -> term 
 use crate::common::frontend::{parse_source, FrontendError};
-use crate::common::language::{Example, Language, Syntax};
+
+/// 
+use crate::common::language::{Example, Syntax, Language};
 
 use super::big_step::TypedArithBigStep;
 use super::compile::TypedArithCompiler;

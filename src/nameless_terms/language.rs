@@ -10,14 +10,14 @@
 
 use std::marker::PhantomData;
 
-use crate::common::frontend::{parse_source, FrontendError};
+use crate::common::frontend::{parse_source, FrontendError, LexError};
 use crate::common::language::{Example, Language, Syntax};
 use crate::common::machine_language::{Compile, NoCompile};
 use crate::common::semantics::{BigStep, NoBigStep, NoTyping, Step, Untyped};
+use crate::common::semantics::substitution::{NoDefinitions};
 
 use super::big_step::NamelessTermsBigStep;
 use super::compile::NamelessTermsCompiler;
-use super::lexer::{NamelessTermsLexer, LexError};
 use super::parser::{NamelessTermsParser, ParseError};
 use super::small_step::{CallByName, CallByValue, NormalOrder};
 use super::terms::Term;
@@ -166,6 +166,8 @@ impl<S: Strategy> Language for NamelessTerms<S> {
     type Small = S;
     type Big = S::Big;
     type Compiler = S::Compiler;
+
+    type Definitions = NoDefinitions;
 
     fn parse(source: &str) -> Result<Term, SyntaxError> {
         parse_source::<

@@ -1,6 +1,7 @@
 //! Os traits de semântica: regras, derivações, passos, big-step,
 //! máquinas e tipagem. Cada linguagem os implementa.
 
+pub mod substitution;
 pub mod capability;
 pub mod rule;
 pub mod derivation;

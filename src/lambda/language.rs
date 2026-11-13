@@ -11,6 +11,7 @@ use crate::common::frontend::{parse_source, FrontendError};
 use crate::common::language::{Example, Language, Syntax};
 use crate::common::machine_language::{Compile, NoCompile};
 use crate::common::semantics::{BigStep, NoBigStep, NoTyping, Step, Untyped};
+use crate::common::semantics::substitution::{NamedDefinitions};
 
 use super::big_step::LambdaBigStep;
 use super::compile::LambdaCompiler;
@@ -141,6 +142,8 @@ impl<S: Strategy> Language for Lambda<S> {
     type Small = S;
     type Big = S::Big;
     type Compiler = S::Compiler;
+
+    type Definitions = NamedDefinitions;
 
     fn parse(source: &str) -> Result<Term, SyntaxError> {
         parse_source::<LambdaScanner, LambdaLexer, LambdaParser>(source)

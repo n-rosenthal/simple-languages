@@ -12,6 +12,8 @@ flycheck
 *.fdb_latexmk
 *.fls
 *.toc
+*.tex
 
+*/flycheck0/*
 simple-languages/*
 target/*

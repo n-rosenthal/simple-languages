@@ -1,5 +1,4 @@
-//! O trait [`Language`]: o que uma linguagem do TAPL fornece ao
-//! backbone.
+//! ## trait [`Language`]
 //!
 //! `Language` é um *pacote*: um tipo marcador por linguagem cujos tipos
 //! associados apontam para os marcadores de cada semântica (`Typing`,
@@ -15,14 +14,29 @@
 
 use std::fmt::Display;
 
+// `Diagnostic` faz parte do pacote de erros (sintaxe, tipo etc) com posição
 use crate::common::diagnostic::Diagnostic;
+
+//  `document` é responsável pela produção de documentos externos (à web)
 use crate::common::document::Block;
+
+// `machine_language` contem as regras de avaliação e compilação da linguagem
+//  para linguagem de máquina abstrata
 use crate::common::machine_language::{compilation_is_correct, Compile, MachineRule};
+
+//  leis às quais devem seguir toda linguagem?
 use crate::common::semantics::laws::{
     final_states_do_not_step, preservation, small_step_agrees_with_big_step,
     trace_is_connected, well_typed_evaluates, well_typed_never_gets_stuck,
 };
+
+//  categorias genéricas de semântica formal para linguagens
 use crate::common::semantics::{run, BigStep, Rule, Step, Typing};
+
+//  suporte à definições globais e substituição de variáveis
+use crate::common::semantics::substitution::DefinitionSupport;
+
+//  produção de expressões latex a partir de termos e tipos
 use crate::common::ToLatex;
 
 /// Um termo de exemplo, com um título, para o REPL e para a página web.
@@ -45,28 +59,53 @@ pub struct Syntax {
 pub trait Language {
     /// Nome usado no CLI (`tapl lambda ...`).
     const NAME: &'static str;
+
     /// Uma linha descrevendo a linguagem.
     const DESCRIPTION: &'static str = "";
+
     /// A linguagem tem variáveis livres, de modo que o interpretador pode
     /// oferecer definições (`nome = termo`)?
     const SUPPORTS_DEFINITIONS: bool = false;
 
+    ///  termos e tipos da linguagem
     type Term: Clone + PartialEq + Display + ToLatex;
     type Type: Clone + PartialEq + Display + ToLatex;
+
+    /// valores da linguagem
     /// O valor da semântica natural. Converte-se em termo para que se possa
     /// compará-lo ao resultado da semântica estrutural.
     type Value: Clone + Display + ToLatex + Into<Self::Term>;
-
+    
+    //  erros de sintaxe
     type SyntaxError: std::error::Error + Diagnostic;
 
+    //  semântica de tipos
     type Typing: Typing<Term = Self::Term, Type = Self::Type>;
+
+    //  avaliação small-step
     type Small: Step<State = Self::Term>;
+
+    //  avaliação big-step
     type Big: BigStep<Term = Self::Term, Value = Self::Value>;
+
+    //  compilação para linguagem de máquina
     type Compiler: Compile<Source = Self::Term, Value = Self::Value>;
+
+    /// suporte à definições globais e à substituição de variáveis
+    type Definitions: DefinitionSupport<Self::Term>;
+
+    /// `[name ↦ value] term`: usada pelo interpretador para expandir
+    /// definições. O padrão não substitui nada (linguagens sem variáveis).
+    fn substitute(term: &Self::Term, _name: &str, _value: &Self::Term) -> Self::Term {
+        term.clone()
+    }
+
 
     /// Texto → termo (scanner, lexer e parser da linguagem).
     fn parse(source: &str) -> Result<Self::Term, Self::SyntaxError>;
 
+
+    /// --- web ---
     /// Exemplos mostrados no REPL (`:examples`) e na página web.
     fn examples() -> &'static [Example] {
         &[]
@@ -77,11 +116,6 @@ pub trait Language {
         &[]
     }
 
-    /// `[name ↦ value] term`: usada pelo interpretador para expandir
-    /// definições. O padrão não substitui nada (linguagens sem variáveis).
-    fn substitute(term: &Self::Term, _name: &str, _value: &Self::Term) -> Self::Term {
-        term.clone()
-    }
 }
 
 /// O que uma linguagem define: quais semânticas existem (as demais são

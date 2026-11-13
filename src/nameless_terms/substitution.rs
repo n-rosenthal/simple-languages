@@ -104,6 +104,25 @@ pub fn beta_reduce(term: &Term) -> Option<Term> {
     }
 }
 
+impl crate::common::semantics::substitution::DeBruijnSubstitution for Term {
+    type Term = Term;
+
+    fn substitute_index(
+        term: &Self::Term,
+        index: usize,
+        replacement: &Self::Term,
+    ) -> Option<Self::Term> {
+        self::substitute(term, index, replacement)
+    }
+
+    fn substitute_top(
+        body: &Self::Term,
+        argument: &Self::Term,
+    ) -> Option<Self::Term> {
+        self::substitute_top(body, argument)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,3 +233,4 @@ mod tests {
         assert_eq!(substitute_top(&body, &replacement), None);
     }
 }
+
